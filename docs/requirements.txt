@@ -1,4 +1,7 @@
 numpy
+scipy
+numba
+numexpr
 pyfftw
 nbsphinx
 pygments>=2.4
