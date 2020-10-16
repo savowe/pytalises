@@ -170,6 +170,22 @@ class Wavefunction:
         """Ndarray of the wave function amplitudes."""
         return np.squeeze(self._amp)
 
+    def exp_pos(self, axis):
+        """
+        Calculate the expected position on given axis.
+
+        Calculates the mean position of Psi on chosen axis.
+        Axes 0,1,2 correspond to x,y,z.
+        The other two axes are traced out.
+        """
+        axes_to_trace = [0, 1, 2]
+        axis = axes_to_trace.pop(axis)
+        psi_sq_amp = np.power(np.abs(self._amp), 2)
+        traced_out_psi = np.sum(psi_sq_amp, axis=tuple(axes_to_trace))
+        exp_pos = np.einsum('ri,r->', traced_out_psi, self.r[axis])
+        exp_pos *= np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+        return exp_pos
+
     def normalize_to(self, n_const):
         """
         Normalize the wave function.
