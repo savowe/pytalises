@@ -33,6 +33,10 @@ class Wavefunction:
         the wave function in psi_list.
         Predefined variables are the spatial coordinates x,y,z
         and time t.
+    normalize_const : float, optional
+        Normalizes the wave function such that the integral of |Psi|^2
+        over all internal and external degrees of freedom equals
+        `normalize_const`
 
     Attributes
     ------------------
@@ -87,8 +91,8 @@ class Wavefunction:
 
     def __init__(
                 self, psi_list, number_of_grid_points,
-                spatial_ext, t0=0.0, m=1.054571817e-34, variables={}
-                ):
+                spatial_ext, t0=0.0, m=1.054571817e-34, variables={},
+                normalize_const=None):
         self.num_int_dim = len(psi_list)
         self.num_ext_dim = sum([1 for n in number_of_grid_points if n > 0])
         assert isinstance(number_of_grid_points, tuple)
@@ -108,10 +112,9 @@ class Wavefunction:
             r_min = spatial_ext_tuple[0]
             r_max = spatial_ext_tuple[1]
             r.append(np.linspace(r_min, r_max, num=number_of_grid_points[i]))
-            Delta_r.append(r_max-r_min)
             if r_max-r_min == 0.0:
-                Delta_r.append(0.0)
-                delta_k.append(0.0)
+                Delta_r.append(np.nan)
+                delta_k.append(np.nan)
                 k.append(0.0)
             else:
                 Delta_r.append(r_max-r_min)
@@ -123,6 +126,8 @@ class Wavefunction:
 
         self.r = r
         self.Delta_r = Delta_r
+        self.delta_r = [Delta/self.number_of_grid_points[i]\
+                        for i,Delta in enumerate(self.Delta_r)]
         self.delta_k = delta_k
         self.k = k
         self.rmesh = np.meshgrid(*r, indexing='ij')
@@ -153,6 +158,7 @@ class Wavefunction:
                                         },
                             order='C'
                             )
+        if normalize_const is not None: self.normalize_to(normalize_const)
 
     @property
     def amp(self):
@@ -160,3 +166,16 @@ class Wavefunction:
         ndarray of the wave function amplitudes
         """
         return np.squeeze(self._amp)
+
+    def normalize_to(self, n_const):
+        """
+        Normalizes the wave function such that the integral
+        of |Psi|^2 over all internal and external states
+        equals n_const
+        """
+        # Calculate |Psi|^2 over all internal and external states
+        s = np.einsum('xyzi,xyzi->', self._amp, np.conjugate(self._amp))
+        # Mulitply with product of infinitesimal volumes dx*dy*dz
+        # while ignoring nonextisten dimensions
+        s *= np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+        self._amp *= np.sqrt(n_const/s)
