@@ -1,3 +1,5 @@
+"""The Wavefunction class and its attributes."""
+
 import numpy as np
 from pyfftw import empty_aligned
 import numexpr as ne
@@ -5,7 +7,7 @@ import numexpr as ne
 
 class Wavefunction:
     """
-    Class describing wave function
+    Class describing wave function.
 
     Parameters
     ------------------
@@ -93,6 +95,7 @@ class Wavefunction:
                 self, psi_list, number_of_grid_points,
                 spatial_ext, t0=0.0, m=1.054571817e-34, variables={},
                 normalize_const=None):
+        """Initialize Wavefunction."""
         self.num_int_dim = len(psi_list)
         self.num_ext_dim = sum([1 for n in number_of_grid_points if n > 0])
         assert isinstance(number_of_grid_points, tuple)
@@ -126,8 +129,8 @@ class Wavefunction:
 
         self.r = r
         self.Delta_r = Delta_r
-        self.delta_r = [Delta/self.number_of_grid_points[i]\
-                        for i,Delta in enumerate(self.Delta_r)]
+        self.delta_r = [Delta/self.number_of_grid_points[i]
+                        for i, Delta in enumerate(self.Delta_r)]
         self.delta_k = delta_k
         self.k = k
         self.rmesh = np.meshgrid(*r, indexing='ij')
@@ -158,17 +161,19 @@ class Wavefunction:
                                         },
                             order='C'
                             )
-        if normalize_const is not None: self.normalize_to(normalize_const)
+        self.normalize_const = normalize_const
+        if normalize_const is not None:
+            self.normalize_to(normalize_const)
 
     @property
     def amp(self):
-        """
-        ndarray of the wave function amplitudes
-        """
+        """Ndarray of the wave function amplitudes."""
         return np.squeeze(self._amp)
 
     def normalize_to(self, n_const):
         """
+        Normalize the wave function.
+
         Normalizes the wave function such that the integral
         of |Psi|^2 over all internal and external states
         equals n_const

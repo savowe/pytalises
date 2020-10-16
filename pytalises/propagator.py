@@ -1,3 +1,5 @@
+"""Module containing functions that help propagating the Wavefunction class."""
+
 from .wavefunction import Wavefunction
 from numba import jit, prange, set_num_threads
 from numpy.linalg import eigh
@@ -9,6 +11,8 @@ from multiprocessing import cpu_count
 
 def propagate(*args, num_time_steps, Delta_t, **kwargs):
     """
+    Propagates a Wavefunction object in time.
+
     Function that propagates the wavefunction using a
     Split-Step Fourier method [1].
 
@@ -50,7 +54,6 @@ def propagate(*args, num_time_steps, Delta_t, **kwargs):
     [1] https://en.wikipedia.org/wiki/Split-step_method
     [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
-
     U = Propagator(*args, **kwargs)
     U.kinetic_prop(Delta_t/2)
     U.potential_prop(Delta_t)
@@ -62,6 +65,8 @@ def propagate(*args, num_time_steps, Delta_t, **kwargs):
 
 def freely_propagate(*args, num_time_steps, Delta_t, **kwargs):
     """
+    Propagates a Wavefunction object in time with V=0.
+
     Function that can propagate the wavefunction if no potential
     is present.
 
@@ -85,7 +90,6 @@ def freely_propagate(*args, num_time_steps, Delta_t, **kwargs):
     --------
     [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
-
     U = Propagator(*args, v_list=["0"], **kwargs)
     for _ in range(num_time_steps):
         U.kinetic_prop(Delta_t)
@@ -133,6 +137,7 @@ class Propagator:
                 num_of_threads=cpu_count(),
                 FFTWflags=('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',)
                 ):
+        """Initialize the propagator."""
         self.v = self.Potential(v_list, variables, diag)
         self.psi = psi
         assert isinstance(psi, Wavefunction)
@@ -158,16 +163,18 @@ class Propagator:
 
     def potential_prop(self, Delta_t):
         """
-        Wrapper function that calculates
-        exp(i*V(x,y,z)/hbar*Delta_t)*Psi(x,y,z) either using
-        nondiag_potential_prop or diag_potential_prop
+        Wrap function that calculates exp(i*V(x,y,z)/hbar*Delta_t)*Psi(x,y,z).
+
+        This can be either nondiag_potential_prop or diag_potential_prop.
         """
         self.prop_method(Delta_t)
 
     def nondiag_potential_prop(self, Delta_t):
         """
-        Calculates exp(i*V(x,y,z)/hbar*Delta_t)*Psi(x,y,z)
-        invoking numerical diagonalization.
+        Calculate exp(i*V/hbar*Delta_t)*Psi using numerical diagonalization.
+
+        This method has to be used if the potential mmatrix has nondiagonal
+        elements.
         """
         self.eval_V()
         get_eig(self.V_eval_array, self.V_eval_eigval_array)
@@ -182,8 +189,11 @@ class Propagator:
 
     def diag_potential_prop(self, Delta_t):
         """
-        Calculates exp(i*V(x,y,z)/hbar*Delta_t)*Psi(x,y,z)
-        considering only diagonal matrix elements.
+        Calculate exp(i*V/hbar*Delta_t)*Psi by simple matrix multiplication.
+
+        This method is used if the potential matrix V is diagonal. This is
+        much faster than `nondiag_potential_prop` and should be used if
+        possible.
         """
         self.eval_V()
         np.einsum(
@@ -195,7 +205,9 @@ class Propagator:
 
     def kinetic_prop(self, Delta_t):
         """
-        Transforms Wavefunction into k-space,
+        Perform time propagation in k-space.
+
+        Transforms the Wavefunction into k-space,
         calculates exp(i*hbar/(2m)*k**2*Delta_t)*Psi(kx,ky,kz)
         and transforms it back into r-space.
         """
@@ -220,8 +232,9 @@ class Propagator:
 
     def eval_V(self):
         """
-        Evalutes V on the whole spatial grid and saves the result
-        in Propagator.V_eval_array.
+        Evalutes V on the whole spatial grid.
+
+        The result is saved in Propagator.V_eval_array.
         """
         k = 0
         for i in range(self.psi.num_int_dim):
@@ -237,10 +250,7 @@ class Propagator:
                 k += 1
 
     def construct_FFT(self, FFTWflags):
-        """
-        Constructs pyfftw bindings to FFTW and saves them
-        in Propagator.fft and Propagator.ifft
-        """
+        """Construct pyfftw bindings."""
         axes = tuple(i for i in range(self.psi.num_ext_dim))
         self.fft = pyfftw.FFTW(
                                 self.psi._amp, self.psi._amp,
@@ -258,30 +268,10 @@ class Propagator:
                                 )
 
     class Potential():
-        """
-        Simple class for collecting information about the potential.
+        """Simple class for collecting information about the potential."""
 
-        Parameters
-        ------------------
-        v_list : list of strings
-            This list contains the matrix elements of the potential term V
-            in string format. If the potential has nondiagonal elements
-            (see optional parameter diag) earch elements represents
-            one matrix element of the lower triangular part of V.
-            For example a 3x3 potential with nondiagonal elements would be
-            of form v_list=[H00, H10, H20, H11, H21, H22].
-            If the potential term is supposed to have only diagonal elements
-            (diag=True), the v_list parameter for a 3x3 potential would
-            look like v_list=[H00,H11,H22].
-        variables : dict, optional
-            Dictionary containing values for variables you might have used
-            in v_list
-        diag : bool , optional
-            If true, no numerical diagonalization has to be invoked in order
-            to calculate time-propagation. Default is False.
-
-        """
         def __init__(self, v_list, variables={}, diag=False):
+            """Initialize Potential."""
             self.v_list = v_list
             self.num_v = len(v_list)
             self.variables = variables
@@ -296,11 +286,13 @@ class Propagator:
 
 
 @jit(nopython=True, parallel=True, nogil=True, fastmath=True)
-def get_eig(M, eigvals):
+def get_eig(matrices, eigvals):
     """
+    Calculate eigenvectors and eigenvalues of matrices in array.
+
     JIT-compiled function that calculates the eigenvectors and
     eigenvalues of input array M in parallel using numba.
-    The resulting eigenvectors are stored in the input matrix M
+    The resulting eigenvectors are stored in the input matrix
     and the eigenvalues in the array eigvals.
 
     Parameters
@@ -308,9 +300,9 @@ def get_eig(M, eigvals):
     M : 3d array of (NxN) arrays
     eigvals : 3d array of 1d arrays with N elements
     """
-    nX, nY, nZ = M.shape[:3]
+    nX, nY, nZ = matrices.shape[:3]
     for i in prange(nX):
         for j in prange(nY):
             for k in prange(nZ):
-                eigvals[i, j, k, :], M[i, j, k, :, :] = \
-                    eigh(M[i, j, k, :, :])
+                eigvals[i, j, k, :], matrices[i, j, k, :, :] = \
+                    eigh(matrices[i, j, k, :, :])

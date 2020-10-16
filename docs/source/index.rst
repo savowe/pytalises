@@ -12,7 +12,7 @@ Welcome to pytalises's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-   free_expansion
+   examples
    pytalises.rst
 
 
