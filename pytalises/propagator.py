@@ -195,7 +195,7 @@ class Propagator:
         much faster than `nondiag_potential_prop` and should be used if
         possible.
         """
-        self.eval_V()
+        self.eval_diag_V()
         np.einsum(
                 'xyzii,xyzi->xyzi',
                 np.exp(1j*self.V_eval_array*Delta_t),
@@ -248,6 +248,22 @@ class Propagator:
                                             },
                                 order='C')
                 k += 1
+
+    def eval_diag_V(self):
+        """
+        Evalutes diagonal elements of V on the whole spatial grid.
+
+        The result is saved in Propagator.V_eval_array.
+        """
+        for i in range(self.psi.num_int_dim):
+            self.V_eval_array[:, :, :, i, i] = \
+                ne.evaluate(
+                            self.v.v_list[i],
+                            local_dict={
+                                        **self.v.variables,
+                                        **self.psi.default_var_dict
+                                        },
+                            order='C')
 
     def construct_FFT(self, FFTWflags):
         """Construct pyfftw bindings."""
