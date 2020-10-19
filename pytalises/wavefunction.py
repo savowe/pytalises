@@ -150,6 +150,8 @@ class Wavefunction:
                                 'y': self.rmesh[1],
                                 'z': self.rmesh[2]
                                 }
+        for i in range(self.num_int_dim):
+            self.default_var_dict["psi"+str(i)] = self._amp[:, :, :, i]
         self.variables = variables
         for i in range(self.num_int_dim):
             self._amp[:, :, :, i] = \
