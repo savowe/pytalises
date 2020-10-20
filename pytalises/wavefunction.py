@@ -211,7 +211,7 @@ class Wavefunction:
 
     def state_occupation(self, nth_state=None):
         """
-        Return occupation number of nth internal state
+        Return occupation number of nth internal state.
 
         Evaluates the spatial integral over |Psi|^2 for
         the nth internal state. If none is given a vector
@@ -223,6 +223,6 @@ class Wavefunction:
             for i in range(self.num_int_dim):
                 state_occupation[i] = self.state_occupation(i)
         else:
-            state_occupation = np.sum(np.abs(self.amp[:,nth_state])**2)*\
+            state_occupation = np.sum(np.abs(self.amp[:, nth_state])**2) * \
                 np.prod(self.delta_r, where=~np.isnan(self.delta_r))
         return state_occupation
