@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(name='pytalises',
-      version='0.1.2',
+      version='0.1.3',
       description="""
       TALISES (This Ain't a LInear Schrödinger Equation Solver) is an easy-to-use Python implementation
       of the Split-Step Fourier Method, for numeric calculation of a wave function's time-propagation
