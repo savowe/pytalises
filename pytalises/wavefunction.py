@@ -172,20 +172,26 @@ class Wavefunction:
         """Ndarray of the wave function amplitudes."""
         return np.squeeze(self._amp)
 
-    def exp_pos(self, axis):
+    def exp_pos(self, axis=None):
         """
         Calculate the expected position on given axis.
 
         Calculates the mean position of Psi on chosen axis.
-        Axes 0,1,2 correspond to x,y,z.
-        The other two axes are traced out.
+        Axes 0,1,2 correspond to x,y,z. The other two axes
+        are traced out. If no axis iv given returns array
+        of mean position of all external degrees of freedom.
         """
-        axes_to_trace = [0, 1, 2]
-        axis = axes_to_trace.pop(axis)
-        psi_sq_amp = np.power(np.abs(self._amp), 2)
-        traced_out_psi = np.sum(psi_sq_amp, axis=tuple(axes_to_trace))
-        exp_pos = np.einsum('ri,r->', traced_out_psi, self.r[axis])
-        exp_pos *= np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+        if axis is None:
+            exp_pos = np.empty((self.num_ext_dim))
+            for i in range(self.num_ext_dim):
+                exp_pos[i] = self.exp_pos(i)
+        else:
+            axes_to_trace = [0, 1, 2]
+            axis = axes_to_trace.pop(axis)
+            psi_sq_amp = np.power(np.abs(self._amp), 2)
+            traced_out_psi = np.sum(psi_sq_amp, axis=tuple(axes_to_trace))
+            exp_pos = np.einsum('ri,r->', traced_out_psi, self.r[axis])
+            exp_pos *= np.prod(self.delta_r, where=~np.isnan(self.delta_r))
         return exp_pos
 
     def normalize_to(self, n_const):
@@ -202,3 +208,21 @@ class Wavefunction:
         # while ignoring nonextisten dimensions
         s *= np.prod(self.delta_r, where=~np.isnan(self.delta_r))
         self._amp *= np.sqrt(n_const/s)
+
+    def state_occupation(self, nth_state=None):
+        """
+        Return occupation number of nth internal state
+
+        Evaluates the spatial integral over |Psi|^2 for
+        the nth internal state. If none is given a vector
+        of the occupation number of all internal states
+        is returned.
+        """
+        if nth_state is None:
+            state_occupation = np.empty((self.num_int_dim,))
+            for i in range(self.num_int_dim):
+                state_occupation[i] = self.state_occupation(i)
+        else:
+            state_occupation = np.sum(np.abs(self.amp[:,nth_state])**2)*\
+                np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+        return state_occupation
