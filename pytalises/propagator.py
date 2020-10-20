@@ -63,7 +63,7 @@ def propagate(*args, num_time_steps, Delta_t, **kwargs):
     U.kinetic_prop(Delta_t/2)
 
 
-def freely_propagate(*args, num_time_steps, Delta_t, **kwargs):
+def freely_propagate(psi, num_time_steps, Delta_t, **kwargs):
     """
     Propagates a Wavefunction object in time with V=0.
 
@@ -90,7 +90,7 @@ def freely_propagate(*args, num_time_steps, Delta_t, **kwargs):
     --------
     [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
-    U = Propagator(*args, v_list=["0"], **kwargs)
+    U = Propagator(psi, v_list=["0"]*psi.num_int_dim, diag=True, **kwargs)
     for _ in range(num_time_steps):
         U.kinetic_prop(Delta_t)
 
