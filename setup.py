@@ -19,9 +19,10 @@ setup(name='pytalises',
       install_requires=[
           'numpy',
           'scipy',
-          'numba',
+          'numba>=0.50',
           'pyfftw',
           'numexpr',
+          'llvmlite>=0.34',
       ],
     classifiers=[
         "Programming Language :: Python :: 3",
