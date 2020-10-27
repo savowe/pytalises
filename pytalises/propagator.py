@@ -20,16 +20,16 @@ def propagate(*args, num_time_steps, Delta_t, **kwargs):
     ------------------
     psi : Wavefunction
         The Wavefunction object the Propagator class acts on
-    v_list : list of strings
+    potential : string list of strings
         This list contains the matrix elements of the potential term V
         in string format. If the potential has nondiagonal elements
         (see optional parameter diag) earch elements represents
         one matrix element of the lower triangular part of V.
         For example a 3x3 potential with nondiagonal elements would be
-        of form v_list=[H00, H10, H20, H11, H21, H22].
+        of form potential=[H00, H10, H20, H11, H21, H22].
         If the potential term is supposed to have only diagonal elements
-        (diag=True), the v_list parameter for a 3x3 potential would
-        look like v_list=[H00,H11,H22].
+        (diag=True), the potential parameter for a 3x3 potential would
+        look like potential=[H00,H11,H22].
     num_time_steps : int
         Number of times the wavefunction is propagated by time Delta_t
         using the Split-Steo Fourier method.
@@ -37,7 +37,7 @@ def propagate(*args, num_time_steps, Delta_t, **kwargs):
         Time increment the wavefunction is propagated in one time step.
     variables : dict, optional
         Dictionary containing values for variables you might have used
-        in v_list
+        in potential
     diag : bool , optional
         If true, no numerical diagonalization has to be invoked in order
         to calculate time-propagation as nondiagonal elements are ommited.
@@ -90,7 +90,7 @@ def freely_propagate(psi, num_time_steps, Delta_t, **kwargs):
     --------
     [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
-    U = Propagator(psi, v_list=["0"]*psi.num_int_dim, diag=True, **kwargs)
+    U = Propagator(psi, potential=["0"]*psi.num_int_dim, diag=True, **kwargs)
     for _ in range(num_time_steps):
         U.kinetic_prop(Delta_t)
 
@@ -103,19 +103,19 @@ class Propagator:
     ------------------
     psi : Wavefunction
         The Wavefunction object the Propagator class acts on
-    v_list : list of strings
+    potential : list of strings
         This list contains the matrix elements of the potential term V
         in string format. If the potential has nondiagonal elements
         (see optional parameter diag) earch elements represents
         one matrix element of the lower triangular part of V.
         For example a 3x3 potential with nondiagonal elements would be
-        of form v_list=[H00, H10, H20, H11, H21, H22].
+        of form potential=[H00, H10, H20, H11, H21, H22].
         If the potential term is supposed to have only diagonal elements
-        (diag=True), the v_list parameter for a 3x3 potential would
-        look like v_list=[H00,H11,H22].
+        (diag=True), the potential argument for a 3x3 potential would
+        look like potential=[H00,H11,H22].
     variables : dict, optional
         Dictionary containing values for variables you might have used
-        in v_list
+        in potential
     diag : bool , optional
         If true, no numerical diagonalization has to be invoked in order
         to calculate time-propagation. Default is False.
@@ -132,13 +132,13 @@ class Propagator:
     """
 
     def __init__(
-                self, psi, v_list,
+                self, psi, potential,
                 variables={}, diag=False,
                 num_of_threads=cpu_count(),
                 FFTWflags=('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',)
                 ):
         """Initialize the propagator."""
-        self.v = self.Potential(v_list, variables, diag)
+        self.v = self.Potential(potential, variables, diag)
         self.psi = psi
         assert isinstance(psi, Wavefunction)
         assert self.v.num_int_dim == self.psi.num_int_dim
@@ -241,7 +241,7 @@ class Propagator:
             for j in range(i, self.psi.num_int_dim):
                 self.V_eval_array[:, :, :, j, i] = \
                     ne.evaluate(
-                                self.v.v_list[k],
+                                self.v.potential[k],
                                 local_dict={
                                             **self.v.variables,
                                             **self.psi.default_var_dict
@@ -258,7 +258,7 @@ class Propagator:
         for i in range(self.psi.num_int_dim):
             self.V_eval_array[:, :, :, i, i] = \
                 ne.evaluate(
-                            self.v.v_list[i],
+                            self.v.potential[i],
                             local_dict={
                                         **self.v.variables,
                                         **self.psi.default_var_dict
@@ -286,10 +286,12 @@ class Propagator:
     class Potential():
         """Simple class for collecting information about the potential."""
 
-        def __init__(self, v_list, variables={}, diag=False):
+        def __init__(self, potential, variables={}, diag=False):
             """Initialize Potential."""
-            self.v_list = v_list
-            self.num_v = len(v_list)
+            if type(potential) is not list and type(potential) is str:
+                potential = [potential]
+            self.potential = potential
+            self.num_v = len(potential)
             self.variables = variables
             self.diag = diag
             if diag is False:
@@ -298,7 +300,7 @@ class Propagator:
                     'Number of potential matrix elements incorrect'
                 self.num_int_dim = int(self.num_int_dim)
             if diag is True:
-                self.num_int_dim = len(v_list)
+                self.num_int_dim = len(potential)
 
 
 @jit(nopython=True, parallel=True, nogil=True, fastmath=True)

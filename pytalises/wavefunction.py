@@ -11,11 +11,11 @@ class Wavefunction:
 
     Parameters
     ------------------
-    psi_list : list of strings
+    psi : string list of strings
         Each string describes the initial amplitude in r-space of
         the wave function. The number of elements is the number
         of internal degrees of freedom.
-        Additional variables that are used in psi_list can
+        Additional variables that are used in psi can
         be defined in the optional parameter variables.
         Predefined variables are the spatial coordinates x,y,z
         and time t.
@@ -32,7 +32,7 @@ class Wavefunction:
         Default is 1.054571817e-34 (numerically equal to hbar).
     variables : dict
         Dictionary of additionaly used variables in the definition of
-        the wave function in psi_list.
+        the wave function in psi.
         Predefined variables are the spatial coordinates x,y,z
         and time t.
     normalize_const : float, optional
@@ -92,11 +92,15 @@ class Wavefunction:
     """
 
     def __init__(
-                self, psi_list, number_of_grid_points,
+                self, psi, number_of_grid_points,
                 spatial_ext, t0=0.0, m=1.054571817e-34, variables={},
                 normalize_const=None):
         """Initialize Wavefunction."""
-        self.num_int_dim = len(psi_list)
+        if type(psi) is not list and type(psi) is str:
+            psi = [psi]
+        if type(spatial_ext) is not list and type(spatial_ext) is tuple:
+            spatial_ext = [spatial_ext]
+        self.num_int_dim = len(psi)
         self.num_ext_dim = sum([1 for n in number_of_grid_points if n > 0])
         assert isinstance(number_of_grid_points, tuple)
         for _ in range(3-len(number_of_grid_points)):
@@ -139,7 +143,7 @@ class Wavefunction:
                                 number_of_grid_points + (self.num_int_dim,),
                                 dtype='complex128', order='C'
                                 )
-        self.psi_list = psi_list
+        self.psi = psi
         self.t = t0
         self.m = m
         self.alpha = 1.054571817e-34/(2*self.m)
@@ -156,7 +160,7 @@ class Wavefunction:
         for i in range(self.num_int_dim):
             self._amp[:, :, :, i] = \
                 ne.evaluate(
-                            self.psi_list[i],
+                            self.psi[i],
                             local_dict={
                                         **self.default_var_dict,
                                         **self.variables
