@@ -1,7 +1,7 @@
-numpy
-scipy
-numba
-numexpr
-pyfftw
+numpy>=1.19
+scipy>=1.5
+numba>=0.50
+numexpr>=2.7
+pyfftw>=0.12
 nbsphinx
 pygments>=2.4
