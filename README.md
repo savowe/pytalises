@@ -17,7 +17,7 @@ Installing pytalises
 ====================
 **We recommend installing pytalises via conda**
 
-####Using conda
+#### Using conda
 
 Installing `pytalises` from the `conda-forge` channel can be achieved by adding `conda-forge` to your channels with:
 
@@ -32,7 +32,7 @@ conda install pytalises
 ```
 
 
-####Using pip
+#### Using pip
 
 pytalises is available on the Python Package Index and can be installed via
 
