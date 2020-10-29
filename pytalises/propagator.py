@@ -9,7 +9,7 @@ import pyfftw
 from multiprocessing import cpu_count
 
 
-def propagate(*args, num_time_steps, Delta_t, **kwargs):
+def propagate(psi, potential, num_time_steps, Delta_t, **kwargs):
     """
     Propagates a Wavefunction object in time.
 
@@ -54,7 +54,7 @@ def propagate(*args, num_time_steps, Delta_t, **kwargs):
     [1] https://en.wikipedia.org/wiki/Split-step_method
     [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
-    U = Propagator(*args, **kwargs)
+    U = Propagator(psi, potential, **kwargs)
     U.kinetic_prop(Delta_t/2)
     U.potential_prop(Delta_t)
     for _ in range(num_time_steps-1):
@@ -63,7 +63,9 @@ def propagate(*args, num_time_steps, Delta_t, **kwargs):
     U.kinetic_prop(Delta_t/2)
 
 
-def freely_propagate(psi, num_time_steps, Delta_t, **kwargs):
+def freely_propagate(psi, num_time_steps, Delta_t,
+                     num_of_threads=cpu_count(),
+                     FFTWflags=('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',)):
     """
     Propagates a Wavefunction object in time with V=0.
 
@@ -90,7 +92,9 @@ def freely_propagate(psi, num_time_steps, Delta_t, **kwargs):
     --------
     [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
-    U = Propagator(psi, potential=["0"]*psi.num_int_dim, diag=True, **kwargs)
+    U = Propagator(psi, potential=["0"]*psi.num_int_dim, diag=True,
+                   num_of_threads=num_of_threads,
+                   FFTWflags=FFTWflags)
     for _ in range(num_time_steps):
         U.kinetic_prop(Delta_t)
 
