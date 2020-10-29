@@ -111,6 +111,7 @@ class Wavefunction:
         assert self.num_ext_dim == len(spatial_ext)
         for _ in range(3-len(spatial_ext)):
             spatial_ext += ((0, 0),)
+        self.axes = tuple(np.where(np.array(number_of_grid_points) > 1, 1, 0))
         r = []
         Delta_r = []
         k = []
@@ -119,7 +120,7 @@ class Wavefunction:
             r_min = spatial_ext_tuple[0]
             r_max = spatial_ext_tuple[1]
             r.append(np.linspace(r_min, r_max, num=number_of_grid_points[i]))
-            if r_max-r_min == 0.0:
+            if self.axes[i] == 0:
                 Delta_r.append(np.nan)
                 delta_k.append(np.nan)
                 k.append(0.0)
@@ -131,7 +132,7 @@ class Wavefunction:
                         2*np.pi*number_of_grid_points[i]/Delta_r[i]
                         )
 
-        self.r = r
+        self._r = r
         self.Delta_r = Delta_r
         self.delta_r = [Delta/self.number_of_grid_points[i]
                         for i, Delta in enumerate(self.Delta_r)]
@@ -172,6 +173,14 @@ class Wavefunction:
             self.normalize_to(normalize_const)
 
     @property
+    def r(self):
+        """(list of) array of the wave function position axes."""
+        if self.num_ext_dim == 1:
+            return self._r[self.axes.index(1)]
+        else:
+            return self._r
+
+    @property
     def amp(self):
         """Ndarray of the wave function amplitudes."""
         return np.squeeze(self._amp)
@@ -194,8 +203,9 @@ class Wavefunction:
             axis = axes_to_trace.pop(axis)
             psi_sq_amp = np.power(np.abs(self._amp), 2)
             traced_out_psi = np.sum(psi_sq_amp, axis=tuple(axes_to_trace))
-            exp_pos = np.einsum('ri,r->', traced_out_psi, self.r[axis])
-            exp_pos *= np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+            exp_pos = np.einsum('ri,r->', traced_out_psi, self._r[axis])
+            exp_pos *= np.prod(
+                self.delta_r, where=np.where(self.axes, True, False))
         return exp_pos
 
     def normalize_to(self, n_const):
@@ -210,7 +220,7 @@ class Wavefunction:
         s = np.einsum('xyzi,xyzi->', self._amp, np.conjugate(self._amp))
         # Mulitply with product of infinitesimal volumes dx*dy*dz
         # while ignoring nonextisten dimensions
-        s *= np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+        s *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
         self._amp *= np.sqrt(n_const/s)
 
     def state_occupation(self, nth_state=None):
@@ -228,5 +238,5 @@ class Wavefunction:
                 state_occupation[i] = self.state_occupation(i)
         else:
             state_occupation = np.sum(np.abs(self.amp[:, nth_state])**2) * \
-                np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+                np.prod(self.delta_r, where=np.where(self.axes, True, False))
         return state_occupation
