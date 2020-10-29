@@ -6,7 +6,6 @@ from numpy.linalg import eigh
 import numexpr as ne
 import numpy as np
 import pyfftw
-from multiprocessing import cpu_count
 
 
 def propagate(psi, potential, num_time_steps, Delta_t, **kwargs):
@@ -64,7 +63,7 @@ def propagate(psi, potential, num_time_steps, Delta_t, **kwargs):
 
 
 def freely_propagate(psi, num_time_steps, Delta_t,
-                     num_of_threads=cpu_count(),
+                     num_of_threads=1,
                      FFTWflags=('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',)):
     """
     Propagates a Wavefunction object in time with V=0.
@@ -82,8 +81,7 @@ def freely_propagate(psi, num_time_steps, Delta_t,
     Delta_t : float
         Time increment the wavefunction is propagated in one time step.
     num_of_threads : int, optional
-        Number of threads uses for calculation. Default behaviour
-        is to use all threads available.
+        Number of threads uses for calculation. Default is 1.
     FFTWflags : tuple of strings
         Options for FFTW planning [1]. Default is
         ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
@@ -124,8 +122,7 @@ class Propagator:
         If true, no numerical diagonalization has to be invoked in order
         to calculate time-propagation. Default is False.
     num_of_threads : int, optional
-        Number of threads uses for calculation. Default behaviour
-        is to use all threads available.
+        Number of threads uses for calculation. Default is 1.
     FFTWflags : tuple of strings
         Options for FFTW planning [1]. Default is
         ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
@@ -138,7 +135,7 @@ class Propagator:
     def __init__(
                 self, psi, potential,
                 variables={}, diag=False,
-                num_of_threads=cpu_count(),
+                num_of_threads=1,
                 FFTWflags=('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',)
                 ):
         """Initialize the propagator."""
@@ -158,7 +155,8 @@ class Propagator:
                                             order='C', dtype='complex128'
                                             )
         self.num_of_threads = num_of_threads
-        set_num_threads(self.num_of_threads)
+        set_num_threads(num_of_threads)
+        ne.set_num_threads(num_of_threads)
         self.construct_FFT(FFTWflags)
         if self.v.diag is True:
             self.prop_method = self.diag_potential_prop
