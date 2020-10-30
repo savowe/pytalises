@@ -161,6 +161,13 @@ class Propagator:
             self.prop_method = self.diag_potential_prop
         else:
             self.prop_method = self.nondiag_potential_prop
+        # Check if potential is static and if that is the case
+        # precompute the potential grid V(x,y,z) to use it
+        # for all following calculations
+        if self.v.static is True:
+            self.eval_V()
+            if self.v.diag is False:
+                get_eig(self.V_eval_array, self.V_eval_eigval_array)
 
     def potential_prop(self, Delta_t):
         """
@@ -177,12 +184,20 @@ class Propagator:
         This method has to be used if the potential mmatrix has nondiagonal
         elements.
         """
-        self.eval_V()
-        get_eig(self.V_eval_array, self.V_eval_eigval_array)
+        if self.v.static is False:
+            print("potential is time-dependent")
+            self.eval_V()
+            get_eig(self.V_eval_array, self.V_eval_eigval_array)
         np.einsum(
                 'xyzij,xyzj,xyzkj,xyzk->xyzi',
                 self.V_eval_array,
-                np.exp(1j*self.V_eval_eigval_array*Delta_t),
+                ne.evaluate(
+                            'exp(1j*eigval*Delta_t)',
+                            local_dict={
+                                        'eigval': self.V_eval_eigval_array,
+                                        'Delta_t': Delta_t
+                                        }
+                            ),
                 np.conjugate(self.V_eval_array),
                 self.psi._amp,
                 out=self.psi._amp, optimize='optimal', order='C'
@@ -196,10 +211,17 @@ class Propagator:
         much faster than `nondiag_potential_prop` and should be used if
         possible.
         """
-        self.eval_diag_V()
+        if self.v.static is False:
+            self.eval_diag_V()
         np.einsum(
                 'xyzii,xyzi->xyzi',
-                np.exp(1j*self.V_eval_array*Delta_t),
+                ne.evaluate(
+                            'exp(1j*V*Delta_t)',
+                            local_dict={
+                                        'V': self.V_eval_array,
+                                        'Delta_t': Delta_t
+                                        }
+                            ),
                 self.psi._amp,
                 out=self.psi._amp, optimize='optimal', order='C'
                 )
@@ -242,7 +264,7 @@ class Propagator:
             for j in range(i, self.psi.num_int_dim):
                 self.V_eval_array[:, :, :, j, i] = \
                     ne.evaluate(
-                                self.v.potential[k],
+                                self.v.potential_strings[k],
                                 local_dict={
                                             **self.v.variables,
                                             **self.psi.default_var_dict
@@ -259,7 +281,7 @@ class Propagator:
         for i in range(self.psi.num_int_dim):
             self.V_eval_array[:, :, :, i, i] = \
                 ne.evaluate(
-                            self.v.potential[i],
+                            self.v.potential_strings[i],
                             local_dict={
                                         **self.v.variables,
                                         **self.psi.default_var_dict
@@ -287,13 +309,48 @@ class Propagator:
     class Potential():
         """Simple class for collecting information about the potential."""
 
-        def __init__(self, potential, variables={}, diag=False):
+        def __init__(self, potential_string, variables={}, diag=False):
             """Initialize Potential."""
-            if type(potential) is not list and type(potential) is str:
-                potential = [potential]
-            self.potential = potential
-            self.num_v = len(potential)
+            if type(potential_string) is not list \
+                    and type(potential_string) is str:
+                self.potential_strings = [potential_string]
+            else:
+                self.potential_strings = potential_string
+            self.num_v = len(self.potential_strings)
             self.variables = variables
+            # Check if potential is static in time
+            for pot_string in self.potential_strings:
+                potential_nex = ne.NumExpr(pot_string)
+                try:
+                    potential_nex.input_names.index("t")
+                    self.static = False
+                except ValueError:
+                    self.static = True
+                if self.static is False:
+                    break
+            # Check if potential is linear (independent of psi).
+            # If it depends on psi, it also depends on t and
+            # is therefore not static
+            for i in range(len(self.potential_strings)):
+                for pot_string in self.potential_strings:
+                    potential_nex = ne.NumExpr(pot_string)
+                    try:
+                        potential_nex.input_names.index("psi"+str(i))
+                        self.linear = False
+                    except ValueError:
+                        self.linear = True
+                    if self.linear is False:
+                        self.static = False
+                        break
+                if self.linear is False:
+                    self.static = False
+                    break
+            # Check if number of matrix elements given matches
+            # the number diagonal or nondiagonal hermitian matrix
+            # elements. In the case of a diagonal matrix the number
+            # of matrix elements is equal to the number of internal
+            # states. If it is nondiagonal one gives the lower
+            # triangular part of V.
             self.diag = diag
             if diag is False:
                 self.num_int_dim = 1/2 * (np.sqrt(8 * self.num_v + 1) - 1)
@@ -301,7 +358,7 @@ class Propagator:
                     'Number of potential matrix elements incorrect'
                 self.num_int_dim = int(self.num_int_dim)
             if diag is True:
-                self.num_int_dim = len(potential)
+                self.num_int_dim = len(self.potential_strings)
 
 
 @jit(nopython=True, parallel=True, nogil=True, fastmath=True)
