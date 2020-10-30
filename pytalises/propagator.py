@@ -1,11 +1,10 @@
 """Module containing functions that help propagating the Wavefunction class."""
-
-from .wavefunction import Wavefunction
 from numba import jit, prange, set_num_threads
 from numpy.linalg import eigh
 import numexpr as ne
 import numpy as np
 import pyfftw
+import pytalises.wavefunction
 
 
 def propagate(psi, potential, num_time_steps, Delta_t, **kwargs):
@@ -141,7 +140,7 @@ class Propagator:
         """Initialize the propagator."""
         self.v = self.Potential(potential, variables, diag)
         self.psi = psi
-        assert isinstance(psi, Wavefunction)
+        assert isinstance(psi, pytalises.wavefunction.Wavefunction)
         assert self.v.num_int_dim == self.psi.num_int_dim
         assert self.psi._amp.shape[-1] == self.psi.num_int_dim
         self.V_eval_array = np.zeros(
