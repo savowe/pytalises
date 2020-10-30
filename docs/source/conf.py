@@ -23,7 +23,7 @@ copyright = '2020, Sascha Vowe, Bastian Leykauf'
 author = 'Sascha Vowe, Bastian Leykauf'
 
 # The full version, including alpha/beta/rc tags
-release = '0.1.8'
+release = '0.2.0'
 
 
 # -- General configuration ---------------------------------------------------
@@ -40,6 +40,7 @@ extensions = [
             'sphinx.ext.mathjax',
             'sphinx.ext.autodoc',
             'sphinx.ext.napoleon',
+            'IPython.sphinxext.ipython_console_highlighting'
 ]
 
 

@@ -3,6 +3,7 @@
 import numpy as np
 from pyfftw import empty_aligned
 import numexpr as ne
+import pytalises.propagator
 
 
 class Wavefunction:
@@ -111,6 +112,7 @@ class Wavefunction:
         assert self.num_ext_dim == len(spatial_ext)
         for _ in range(3-len(spatial_ext)):
             spatial_ext += ((0, 0),)
+        self.axes = tuple(np.where(np.array(number_of_grid_points) > 1, 1, 0))
         r = []
         Delta_r = []
         k = []
@@ -119,7 +121,7 @@ class Wavefunction:
             r_min = spatial_ext_tuple[0]
             r_max = spatial_ext_tuple[1]
             r.append(np.linspace(r_min, r_max, num=number_of_grid_points[i]))
-            if r_max-r_min == 0.0:
+            if self.axes[i] == 0:
                 Delta_r.append(np.nan)
                 delta_k.append(np.nan)
                 k.append(0.0)
@@ -131,7 +133,7 @@ class Wavefunction:
                         2*np.pi*number_of_grid_points[i]/Delta_r[i]
                         )
 
-        self.r = r
+        self._r = r
         self.Delta_r = Delta_r
         self.delta_r = [Delta/self.number_of_grid_points[i]
                         for i, Delta in enumerate(self.Delta_r)]
@@ -172,6 +174,14 @@ class Wavefunction:
             self.normalize_to(normalize_const)
 
     @property
+    def r(self):
+        """(list of) array of the wave function position axes."""
+        if self.num_ext_dim == 1:
+            return self._r[self.axes.index(1)]
+        else:
+            return self._r
+
+    @property
     def amp(self):
         """Ndarray of the wave function amplitudes."""
         return np.squeeze(self._amp)
@@ -194,8 +204,9 @@ class Wavefunction:
             axis = axes_to_trace.pop(axis)
             psi_sq_amp = np.power(np.abs(self._amp), 2)
             traced_out_psi = np.sum(psi_sq_amp, axis=tuple(axes_to_trace))
-            exp_pos = np.einsum('ri,r->', traced_out_psi, self.r[axis])
-            exp_pos *= np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+            exp_pos = np.einsum('ri,r->', traced_out_psi, self._r[axis])
+            exp_pos *= np.prod(
+                self.delta_r, where=np.where(self.axes, True, False))
         return exp_pos
 
     def normalize_to(self, n_const):
@@ -210,7 +221,7 @@ class Wavefunction:
         s = np.einsum('xyzi,xyzi->', self._amp, np.conjugate(self._amp))
         # Mulitply with product of infinitesimal volumes dx*dy*dz
         # while ignoring nonextisten dimensions
-        s *= np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+        s *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
         self._amp *= np.sqrt(n_const/s)
 
     def state_occupation(self, nth_state=None):
@@ -228,5 +239,82 @@ class Wavefunction:
                 state_occupation[i] = self.state_occupation(i)
         else:
             state_occupation = np.sum(np.abs(self.amp[:, nth_state])**2) * \
-                np.prod(self.delta_r, where=~np.isnan(self.delta_r))
+                np.prod(self.delta_r, where=np.where(self.axes, True, False))
         return state_occupation
+
+    def freely_propagate(self, num_time_steps, Delta_t,
+                         num_of_threads=1,
+                         FFTWflags=('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',)):
+        """
+        Propagates the Wavefunction object in time with V=0.
+
+        Function that can propagate the wavefunction if no potential
+        is present.
+
+        Parameters
+        ------------------
+        num_time_steps : int
+            Number of times the wavefunction is propagated by time Delta_t
+            using the Split-Steo Fourier method.
+        Delta_t : float
+            Time increment the wavefunction is propagated in one time step.
+        num_of_threads : int, optional
+            Number of threads uses for calculation. Default is 1.
+        FFTWflags : tuple of strings
+            Options for FFTW planning [1]. Default is
+            ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
+
+        References
+        --------
+        [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
+        """
+        pytalises.propagator.freely_propagate(self, num_time_steps, Delta_t,
+                                              num_of_threads,
+                                              FFTWflags)
+
+    def propagate(self, potential, num_time_steps, Delta_t, **kwargs):
+        """
+        Propagates the Wavefunction object in time.
+
+        Function that propagates the wavefunction using a
+        Split-Step Fourier method [1].
+
+        Parameters
+        ------------------
+        potential : string list of strings
+            This list contains the matrix elements of the potential term V
+            in string format. If the potential has nondiagonal elements
+            (see optional parameter diag) earch elements represents
+            one matrix element of the lower triangular part of V.
+            For example a 3x3 potential with nondiagonal elements would be
+            of form potential=[H00, H10, H20, H11, H21, H22].
+            If the potential term is supposed to have only diagonal elements
+            (diag=True), the potential parameter for a 3x3 potential would
+            look like potential=[H00,H11,H22].
+        num_time_steps : int
+            Number of times the wavefunction is propagated by time Delta_t
+            using the Split-Steo Fourier method.
+        Delta_t : float
+            Time increment the wavefunction is propagated in one time step.
+        variables : dict, optional
+            Dictionary containing values for variables you might have used
+            in potential
+        diag : bool , optional
+            If true, no numerical diagonalization has to be invoked in order
+            to calculate time-propagation as nondiagonal elements are ommited.
+            This makes the computation much faster. Default is False.
+        num_of_threads : int, optional
+            Number of threads uses for calculation. Default behaviour
+            is to use all threads available.
+        FFTWflags : tuple of strings
+            Options for FFTW planning [2]. Default is
+            ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
+
+        References
+        --------
+        [1] https://en.wikipedia.org/wiki/Split-step_method
+        [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
+        """
+        pytalises.propagator.propagate(self, potential,
+                                       num_time_steps, Delta_t,
+                                       **kwargs)
