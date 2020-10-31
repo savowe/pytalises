@@ -3,7 +3,11 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-See example in `some link text <free_expansion.html>`_
+TALISES (This Ain't a LInear Schrödinger Equation Solver) is an easy-to-use
+Python implementation of the Split-Step Fourier Method, for numeric
+calculation of a wave function's time-propagation under the Schrödinger equation.
+
+We recommend reading `Usage and Examples <examples.html>`_
 
 Welcome to pytalises's documentation!
 =====================================
@@ -13,6 +17,7 @@ Welcome to pytalises's documentation!
    :caption: Contents:
 
    examples
+   notes
    pytalises.rst
 
 
