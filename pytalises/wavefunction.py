@@ -93,9 +93,15 @@ class Wavefunction:
     """
 
     def __init__(
-                self, psi, number_of_grid_points,
-                spatial_ext, t0=0.0, m=1.054571817e-34, variables={},
-                normalize_const=None):
+        self,
+        psi,
+        number_of_grid_points,
+        spatial_ext,
+        t0=0.0,
+        m=1.054571817e-34,
+        variables={},
+        normalize_const=None,
+    ):
         """Initialize Wavefunction."""
         if type(psi) is not list and type(psi) is str:
             psi = [psi]
@@ -104,13 +110,13 @@ class Wavefunction:
         self.num_int_dim = len(psi)
         self.num_ext_dim = sum([1 for n in number_of_grid_points if n > 0])
         assert isinstance(number_of_grid_points, tuple)
-        for _ in range(3-len(number_of_grid_points)):
+        for _ in range(3 - len(number_of_grid_points)):
             number_of_grid_points += (1,)
         self.nX, self.nY, self.nZ = number_of_grid_points
         self.number_of_grid_points = number_of_grid_points
         self.spatial_ext = spatial_ext
         assert self.num_ext_dim == len(spatial_ext)
-        for _ in range(3-len(spatial_ext)):
+        for _ in range(3 - len(spatial_ext)):
             spatial_ext += ((0, 0),)
         self.axes = tuple(np.where(np.array(number_of_grid_points) > 1, 1, 0))
         r = []
@@ -126,49 +132,49 @@ class Wavefunction:
                 delta_k.append(np.nan)
                 k.append(0.0)
             else:
-                Delta_r.append(r_max-r_min)
-                delta_k.append(2*np.pi/(r_max-r_min))
+                Delta_r.append(r_max - r_min)
+                delta_k.append(2 * np.pi / (r_max - r_min))
                 k.append(
-                        np.fft.fftfreq(number_of_grid_points[i]) *
-                        2*np.pi*number_of_grid_points[i]/Delta_r[i]
-                        )
+                    np.fft.fftfreq(number_of_grid_points[i])
+                    * 2
+                    * np.pi
+                    * number_of_grid_points[i]
+                    / Delta_r[i]
+                )
 
         self._r = r
         self.Delta_r = Delta_r
-        self.delta_r = [Delta/self.number_of_grid_points[i]
-                        for i, Delta in enumerate(self.Delta_r)]
+        self.delta_r = [
+            Delta / self.number_of_grid_points[i]
+            for i, Delta in enumerate(self.Delta_r)
+        ]
         self.delta_k = delta_k
         self.k = k
-        self.rmesh = np.meshgrid(*r, indexing='ij')
-        self.kmesh = np.meshgrid(*k, indexing='ij')
+        self.rmesh = np.meshgrid(*r, indexing="ij")
+        self.kmesh = np.meshgrid(*k, indexing="ij")
         self._amp = empty_aligned(
-                                number_of_grid_points + (self.num_int_dim,),
-                                dtype='complex128', order='C'
-                                )
+            number_of_grid_points + (self.num_int_dim,), dtype="complex128", order="C"
+        )
         self.psi = psi
         self.t = t0
         self.m = m
-        self.alpha = 1.054571817e-34/(2*self.m)
+        self.alpha = 1.054571817e-34 / (2 * self.m)
         self.default_var_dict = {
-                                't': self.t,
-                                'alpha': self.alpha,
-                                'x': self.rmesh[0],
-                                'y': self.rmesh[1],
-                                'z': self.rmesh[2]
-                                }
+            "t": self.t,
+            "alpha": self.alpha,
+            "x": self.rmesh[0],
+            "y": self.rmesh[1],
+            "z": self.rmesh[2],
+        }
         for i in range(self.num_int_dim):
-            self.default_var_dict["psi"+str(i)] = self._amp[:, :, :, i]
+            self.default_var_dict["psi" + str(i)] = self._amp[:, :, :, i]
         self.variables = variables
         for i in range(self.num_int_dim):
-            self._amp[:, :, :, i] = \
-                ne.evaluate(
-                            self.psi[i],
-                            local_dict={
-                                        **self.default_var_dict,
-                                        **self.variables
-                                        },
-                            order='C'
-                            )
+            self._amp[:, :, :, i] = ne.evaluate(
+                self.psi[i],
+                local_dict={**self.default_var_dict, **self.variables},
+                order="C",
+            )
         self.normalize_const = normalize_const
         if normalize_const is not None:
             self.normalize_to(normalize_const)
@@ -204,9 +210,8 @@ class Wavefunction:
             axis = axes_to_trace.pop(axis)
             psi_sq_amp = np.power(np.abs(self._amp), 2)
             traced_out_psi = np.sum(psi_sq_amp, axis=tuple(axes_to_trace))
-            exp_pos = np.einsum('ri,r->', traced_out_psi, self._r[axis])
-            exp_pos *= np.prod(
-                self.delta_r, where=np.where(self.axes, True, False))
+            exp_pos = np.einsum("ri,r->", traced_out_psi, self._r[axis])
+            exp_pos *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
         return exp_pos
 
     def normalize_to(self, n_const):
@@ -218,11 +223,11 @@ class Wavefunction:
         equals n_const
         """
         # Calculate |Psi|^2 over all internal and external states
-        s = np.einsum('xyzi,xyzi->', self._amp, np.conjugate(self._amp))
+        s = np.einsum("xyzi,xyzi->", self._amp, np.conjugate(self._amp))
         # Mulitply with product of infinitesimal volumes dx*dy*dz
         # while ignoring nonextisten dimensions
         s *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
-        self._amp *= np.sqrt(n_const/s)
+        self._amp *= np.sqrt(n_const / s)
 
     def state_occupation(self, nth_state=None):
         """
@@ -238,13 +243,21 @@ class Wavefunction:
             for i in range(self.num_int_dim):
                 state_occupation[i] = self.state_occupation(i)
         else:
-            state_occupation = np.sum(np.abs(self.amp[:, nth_state])**2) * \
-                np.prod(self.delta_r, where=np.where(self.axes, True, False))
+            state_occupation = np.sum(np.abs(self.amp[:, nth_state]) ** 2) * np.prod(
+                self.delta_r, where=np.where(self.axes, True, False)
+            )
         return state_occupation
 
-    def freely_propagate(self, num_time_steps, Delta_t,
-                         num_of_threads=1,
-                         FFTWflags=('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',)):
+    def freely_propagate(
+        self,
+        num_time_steps,
+        delta_t,
+        num_of_threads=1,
+        FFTWflags=(
+            "FFTW_ESTIMATE",
+            "FFTW_DESTROY_INPUT",
+        ),
+    ):
         """
         Propagates the Wavefunction object in time with V=0.
 
@@ -254,9 +267,9 @@ class Wavefunction:
         Parameters
         ------------------
         num_time_steps : int
-            Number of times the wavefunction is propagated by time Delta_t
+            Number of times the wavefunction is propagated by time delta_t
             using the Split-Steo Fourier method.
-        Delta_t : float
+        delta_t : float
             Time increment the wavefunction is propagated in one time step.
         num_of_threads : int, optional
             Number of threads uses for calculation. Default is 1.
@@ -268,11 +281,11 @@ class Wavefunction:
         --------
         [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
         """
-        pytalises.propagator.freely_propagate(self, num_time_steps, Delta_t,
-                                              num_of_threads,
-                                              FFTWflags)
+        pytalises.propagator.freely_propagate(
+            self, num_time_steps, delta_t, num_of_threads, FFTWflags
+        )
 
-    def propagate(self, potential, num_time_steps, Delta_t, **kwargs):
+    def propagate(self, potential, num_time_steps, delta_t, **kwargs):
         """
         Propagates the Wavefunction object in time.
 
@@ -292,9 +305,9 @@ class Wavefunction:
             (diag=True), the potential parameter for a 3x3 potential would
             look like potential=[H00,H11,H22].
         num_time_steps : int
-            Number of times the wavefunction is propagated by time Delta_t
+            Number of times the wavefunction is propagated by time delta_t
             using the Split-Steo Fourier method.
-        Delta_t : float
+        delta_t : float
             Time increment the wavefunction is propagated in one time step.
         variables : dict, optional
             Dictionary containing values for variables you might have used
@@ -315,6 +328,6 @@ class Wavefunction:
         [1] https://en.wikipedia.org/wiki/Split-step_method
         [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
         """
-        pytalises.propagator.propagate(self, potential,
-                                       num_time_steps, Delta_t,
-                                       **kwargs)
+        pytalises.propagator.propagate(
+            self, potential, num_time_steps, delta_t, **kwargs
+        )
