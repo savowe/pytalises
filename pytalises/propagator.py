@@ -173,7 +173,7 @@ class Propagator:
         self.num_of_threads = num_of_threads
         set_num_threads(num_of_threads)
         ne.set_num_threads(num_of_threads)
-        self.construct_FFT(FFTWflags)
+        self.psi.construct_FFT(num_of_threads , FFTWflags)
         if self.v.diag is True:
             self.prop_method = self.diag_potential_prop
         else:
@@ -249,7 +249,7 @@ class Propagator:
         calculates exp(i*hbar/(2m)*k**2*Delta_t)*Psi(kx,ky,kz)
         and transforms it back into r-space.
         """
-        self.fft()
+        self.psi.fft()
         np.einsum(
             "xyz,xyzi->xyzi",
             ne.evaluate(
@@ -267,7 +267,7 @@ class Propagator:
             out=self.psi._amp,
             optimize="optimal",
         )
-        self.ifft()
+        self.psi.ifft()
         self.psi.t += Delta_t
 
     def eval_V(self):
@@ -299,25 +299,6 @@ class Propagator:
                 order="C",
             )
 
-    def construct_FFT(self, FFTWflags):
-        """Construct pyfftw bindings."""
-        axes = tuple(i for i in range(self.psi.num_ext_dim))
-        self.fft = pyfftw.FFTW(
-            self.psi._amp,
-            self.psi._amp,
-            axes=axes,
-            direction="FFTW_FORWARD",
-            threads=self.num_of_threads,
-            flags=FFTWflags,
-        )
-        self.ifft = pyfftw.FFTW(
-            self.psi._amp,
-            self.psi._amp,
-            axes=axes,
-            direction="FFTW_BACKWARD",
-            threads=self.num_of_threads,
-            flags=FFTWflags,
-        )
 
     class Potential:
         """Simple class for collecting information about the potential."""
