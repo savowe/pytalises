@@ -180,13 +180,14 @@ class Wavefunction:
             self.normalize_to(normalize_const)
         self.construct_FFT()
 
-    def construct_FFT(self,
-                    num_of_threads=1,
-                    FFTWflags=(
-                "FFTW_ESTIMATE",
-                "FFTW_DESTROY_INPUT",
-            ),
-        ):
+    def construct_FFT(
+        self,
+        num_of_threads=1,
+        FFTWflags=(
+            "FFTW_ESTIMATE",
+            "FFTW_DESTROY_INPUT",
+        ),
+    ):
         """Construct pyfftw bindings."""
         axes = tuple(i for i in range(self.num_ext_dim))
         pyfftw.config.NUM_THREADS = num_of_threads

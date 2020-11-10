@@ -3,7 +3,6 @@ from numba import jit, prange, set_num_threads
 from numpy.linalg import eigh
 import numexpr as ne
 import numpy as np
-import pyfftw
 import pytalises.wavefunction
 
 
@@ -173,7 +172,7 @@ class Propagator:
         self.num_of_threads = num_of_threads
         set_num_threads(num_of_threads)
         ne.set_num_threads(num_of_threads)
-        self.psi.construct_FFT(num_of_threads , FFTWflags)
+        self.psi.construct_FFT(num_of_threads, FFTWflags)
         if self.v.diag is True:
             self.prop_method = self.diag_potential_prop
         else:
@@ -298,7 +297,6 @@ class Propagator:
                 local_dict={**self.v.variables, **self.psi.default_var_dict},
                 order="C",
             )
-
 
     class Potential:
         """Simple class for collecting information about the potential."""
