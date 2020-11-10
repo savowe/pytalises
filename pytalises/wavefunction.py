@@ -149,7 +149,7 @@ class Wavefunction:
             for i, Delta in enumerate(self.Delta_r)
         ]
         self.delta_k = delta_k
-        self.k = k
+        self._k = k
         self.rmesh = np.meshgrid(*r, indexing="ij")
         self.kmesh = np.meshgrid(*k, indexing="ij")
         self._amp = pyfftw.empty_aligned(
@@ -215,6 +215,14 @@ class Wavefunction:
             return self._r[self.axes.index(1)]
         else:
             return self._r
+
+    @property
+    def k(self):
+        """(list of) array of the wave function position axes."""
+        if self.num_ext_dim == 1:
+            return self._k[self.axes.index(1)]
+        else:
+            return self._k
 
     @property
     def amp(self):
