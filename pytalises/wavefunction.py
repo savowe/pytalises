@@ -1,7 +1,7 @@
 """The Wavefunction class and its attributes."""
 
 import numpy as np
-from pyfftw import empty_aligned
+import pyfftw
 import numexpr as ne
 import pytalises.propagator
 
@@ -149,10 +149,10 @@ class Wavefunction:
             for i, Delta in enumerate(self.Delta_r)
         ]
         self.delta_k = delta_k
-        self.k = k
+        self._k = k
         self.rmesh = np.meshgrid(*r, indexing="ij")
         self.kmesh = np.meshgrid(*k, indexing="ij")
-        self._amp = empty_aligned(
+        self._amp = pyfftw.empty_aligned(
             number_of_grid_points + (self.num_int_dim,), dtype="complex128", order="C"
         )
         self.psi = psi
@@ -178,6 +178,35 @@ class Wavefunction:
         self.normalize_const = normalize_const
         if normalize_const is not None:
             self.normalize_to(normalize_const)
+        self.construct_FFT()
+
+    def construct_FFT(
+        self,
+        num_of_threads=1,
+        FFTWflags=(
+            "FFTW_ESTIMATE",
+            "FFTW_DESTROY_INPUT",
+        ),
+    ):
+        """Construct pyfftw bindings."""
+        axes = tuple(i for i in range(self.num_ext_dim))
+        pyfftw.config.NUM_THREADS = num_of_threads
+        self.fft = pyfftw.FFTW(
+            self._amp,
+            self._amp,
+            axes=axes,
+            direction="FFTW_FORWARD",
+            threads=num_of_threads,
+            flags=FFTWflags,
+        )
+        self.ifft = pyfftw.FFTW(
+            self._amp,
+            self._amp,
+            axes=axes,
+            direction="FFTW_BACKWARD",
+            threads=num_of_threads,
+            flags=FFTWflags,
+        )
 
     @property
     def r(self):
@@ -186,6 +215,14 @@ class Wavefunction:
             return self._r[self.axes.index(1)]
         else:
             return self._r
+
+    @property
+    def k(self):
+        """(list of) array of the wave function position axes."""
+        if self.num_ext_dim == 1:
+            return self._k[self.axes.index(1)]
+        else:
+            return self._k
 
     @property
     def amp(self):
