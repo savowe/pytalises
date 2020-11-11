@@ -281,7 +281,7 @@ class Propagator:
                 self.V_eval_array[:, :, :, j, i] = ne.evaluate(
                     self.v.potential_strings[k],
                     local_dict={**self.v.variables, **self.psi.default_var_dict},
-                    global_dict={'t': self.psi.t},
+                    global_dict={"t": self.psi.t},
                     order="C",
                 )
                 k += 1
@@ -296,7 +296,7 @@ class Propagator:
             self.V_eval_array[:, :, :, i, i] = ne.evaluate(
                 self.v.potential_strings[i],
                 local_dict={**self.v.variables, **self.psi.default_var_dict},
-                global_dict={'t': self.psi.t},
+                global_dict={"t": self.psi.t},
                 order="C",
             )
 
