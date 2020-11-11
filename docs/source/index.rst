@@ -18,6 +18,7 @@ Welcome to pytalises's documentation!
 
    examples
    notes
+   additional_examples
    pytalises.rst
 
 
