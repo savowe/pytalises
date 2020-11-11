@@ -288,7 +288,7 @@ class Wavefunction:
     def freely_propagate(
         self,
         num_time_steps,
-        Delta_t,
+        delta_t,
         num_of_threads=1,
         FFTWflags=(
             "FFTW_ESTIMATE",
@@ -304,9 +304,9 @@ class Wavefunction:
         Parameters
         ------------------
         num_time_steps : int
-            Number of times the wavefunction is propagated by time Delta_t
+            Number of times the wavefunction is propagated by time delta_t
             using the Split-Steo Fourier method.
-        Delta_t : float
+        delta_t : float
             Time increment the wavefunction is propagated in one time step.
         num_of_threads : int, optional
             Number of threads uses for calculation. Default is 1.
@@ -319,10 +319,10 @@ class Wavefunction:
         [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
         """
         pytalises.propagator.freely_propagate(
-            self, num_time_steps, Delta_t, num_of_threads, FFTWflags
+            self, num_time_steps, delta_t, num_of_threads, FFTWflags
         )
 
-    def propagate(self, potential, num_time_steps, Delta_t, **kwargs):
+    def propagate(self, potential, num_time_steps, delta_t, **kwargs):
         """
         Propagates the Wavefunction object in time.
 
@@ -342,9 +342,9 @@ class Wavefunction:
             (diag=True), the potential parameter for a 3x3 potential would
             look like potential=[H00,H11,H22].
         num_time_steps : int
-            Number of times the wavefunction is propagated by time Delta_t
+            Number of times the wavefunction is propagated by time delta_t
             using the Split-Steo Fourier method.
-        Delta_t : float
+        delta_t : float
             Time increment the wavefunction is propagated in one time step.
         variables : dict, optional
             Dictionary containing values for variables you might have used
@@ -366,5 +366,5 @@ class Wavefunction:
         [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
         """
         pytalises.propagator.propagate(
-            self, potential, num_time_steps, Delta_t, **kwargs
+            self, potential, num_time_steps, delta_t, **kwargs
         )

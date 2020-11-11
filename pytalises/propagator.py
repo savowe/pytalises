@@ -6,7 +6,7 @@ import numpy as np
 import pytalises.wavefunction
 
 
-def propagate(psi, potential, num_time_steps, Delta_t, **kwargs):
+def propagate(psi, potential, num_time_steps, delta_t, **kwargs):
     """
     Propagates a Wavefunction object in time.
 
@@ -28,9 +28,9 @@ def propagate(psi, potential, num_time_steps, Delta_t, **kwargs):
         (diag=True), the potential parameter for a 3x3 potential would
         look like potential=[H00,H11,H22].
     num_time_steps : int
-        Number of times the wavefunction is propagated by time Delta_t
+        Number of times the wavefunction is propagated by time delta_t
         using the Split-Steo Fourier method.
-    Delta_t : float
+    delta_t : float
         Time increment the wavefunction is propagated in one time step.
     variables : dict, optional
         Dictionary containing values for variables you might have used
@@ -52,18 +52,18 @@ def propagate(psi, potential, num_time_steps, Delta_t, **kwargs):
     [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
     U = Propagator(psi, potential, **kwargs)
-    U.kinetic_prop(Delta_t / 2)
-    U.potential_prop(Delta_t)
+    U.kinetic_prop(delta_t / 2)
+    U.potential_prop(delta_t)
     for _ in range(num_time_steps - 1):
-        U.kinetic_prop(Delta_t)
-        U.potential_prop(Delta_t)
-    U.kinetic_prop(Delta_t / 2)
+        U.kinetic_prop(delta_t)
+        U.potential_prop(delta_t)
+    U.kinetic_prop(delta_t / 2)
 
 
 def freely_propagate(
     psi,
     num_time_steps,
-    Delta_t,
+    delta_t,
     num_of_threads=1,
     FFTWflags=(
         "FFTW_ESTIMATE",
@@ -81,9 +81,9 @@ def freely_propagate(
     psi : Wavefunction
         The Wavefunction object the Propagator class acts on
     num_time_steps : int
-        Number of times the wavefunction is propagated by time Delta_t
+        Number of times the wavefunction is propagated by time delta_t
         using the Split-Steo Fourier method.
-    Delta_t : float
+    delta_t : float
         Time increment the wavefunction is propagated in one time step.
     num_of_threads : int, optional
         Number of threads uses for calculation. Default is 1.
@@ -103,7 +103,7 @@ def freely_propagate(
         FFTWflags=FFTWflags,
     )
     for _ in range(num_time_steps):
-        U.kinetic_prop(Delta_t)
+        U.kinetic_prop(delta_t)
 
 
 class Propagator:
@@ -185,17 +185,17 @@ class Propagator:
             if self.v.diag is False:
                 get_eig(self.V_eval_array, self.V_eval_eigval_array)
 
-    def potential_prop(self, Delta_t):
+    def potential_prop(self, delta_t):
         """
-        Wrap function that calculates exp(i*V(x,y,z)/hbar*Delta_t)*Psi(x,y,z).
+        Wrap function that calculates exp(i*V(x,y,z)/hbar*delta_t)*Psi(x,y,z).
 
         This can be either nondiag_potential_prop or diag_potential_prop.
         """
-        self.prop_method(Delta_t)
+        self.prop_method(delta_t)
 
-    def nondiag_potential_prop(self, Delta_t):
+    def nondiag_potential_prop(self, delta_t):
         """
-        Calculate exp(i*V/hbar*Delta_t)*Psi using numerical diagonalization.
+        Calculate exp(i*V/hbar*delta_t)*Psi using numerical diagonalization.
 
         This method has to be used if the potential mmatrix has nondiagonal
         elements.
@@ -208,8 +208,8 @@ class Propagator:
             "xyzij,xyzj,xyzkj,xyzk->xyzi",
             self.V_eval_array,
             ne.evaluate(
-                "exp(1j*eigval*Delta_t)",
-                local_dict={"eigval": self.V_eval_eigval_array, "Delta_t": Delta_t},
+                "exp(1j*eigval*delta_t)",
+                local_dict={"eigval": self.V_eval_eigval_array, "delta_t": delta_t},
             ),
             np.conjugate(self.V_eval_array),
             self.psi._amp,
@@ -218,9 +218,9 @@ class Propagator:
             order="C",
         )
 
-    def diag_potential_prop(self, Delta_t):
+    def diag_potential_prop(self, delta_t):
         """
-        Calculate exp(i*V/hbar*Delta_t)*Psi by simple matrix multiplication.
+        Calculate exp(i*V/hbar*delta_t)*Psi by simple matrix multiplication.
 
         This method is used if the potential matrix V is diagonal. This is
         much faster than `nondiag_potential_prop` and should be used if
@@ -231,8 +231,8 @@ class Propagator:
         np.einsum(
             "xyzii,xyzi->xyzi",
             ne.evaluate(
-                "exp(1j*V*Delta_t)",
-                local_dict={"V": self.V_eval_array, "Delta_t": Delta_t},
+                "exp(1j*V*delta_t)",
+                local_dict={"V": self.V_eval_array, "delta_t": delta_t},
             ),
             self.psi._amp,
             out=self.psi._amp,
@@ -240,25 +240,25 @@ class Propagator:
             order="C",
         )
 
-    def kinetic_prop(self, Delta_t):
+    def kinetic_prop(self, delta_t):
         """
         Perform time propagation in k-space.
 
         Transforms the Wavefunction into k-space,
-        calculates exp(i*hbar/(2m)*k**2*Delta_t)*Psi(kx,ky,kz)
+        calculates exp(i*hbar/(2m)*k**2*delta_t)*Psi(kx,ky,kz)
         and transforms it back into r-space.
         """
         self.psi.fft()
         np.einsum(
             "xyz,xyzi->xyzi",
             ne.evaluate(
-                "exp(1j*alpha*Delta_t*(kx**2+ky**2+kz**2))",
+                "exp(1j*alpha*delta_t*(kx**2+ky**2+kz**2))",
                 local_dict={
                     "kx": self.psi.kmesh[0],
                     "ky": self.psi.kmesh[1],
                     "kz": self.psi.kmesh[2],
                     "alpha": self.psi.alpha,
-                    "Delta_t": Delta_t,
+                    "delta_t": delta_t,
                 },
                 order="C",
             ),
@@ -267,7 +267,7 @@ class Propagator:
             optimize="optimal",
         )
         self.psi.ifft()
-        self.psi.t += Delta_t
+        self.psi.t += delta_t
 
     def eval_V(self):
         """
