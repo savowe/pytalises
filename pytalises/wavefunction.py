@@ -160,7 +160,6 @@ class Wavefunction:
         self.m = m
         self.alpha = 1.054571817e-34 / (2 * self.m)
         self.default_var_dict = {
-            "t": self.t,
             "alpha": self.alpha,
             "x": self.rmesh[0],
             "y": self.rmesh[1],

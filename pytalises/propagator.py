@@ -154,8 +154,8 @@ class Propagator:
         ),
     ):
         """Initialize the propagator."""
-        self.v = self.Potential(potential, variables, diag)
         self.psi = psi
+        self.v = self.Potential(potential, variables, diag)
         assert isinstance(psi, pytalises.wavefunction.Wavefunction)
         assert self.v.num_int_dim == self.psi.num_int_dim
         assert self.psi._amp.shape[-1] == self.psi.num_int_dim
@@ -281,6 +281,7 @@ class Propagator:
                 self.V_eval_array[:, :, :, j, i] = ne.evaluate(
                     self.v.potential_strings[k],
                     local_dict={**self.v.variables, **self.psi.default_var_dict},
+                    global_dict={'t': self.psi.t},
                     order="C",
                 )
                 k += 1
@@ -295,6 +296,7 @@ class Propagator:
             self.V_eval_array[:, :, :, i, i] = ne.evaluate(
                 self.v.potential_strings[i],
                 local_dict={**self.v.variables, **self.psi.default_var_dict},
+                global_dict={'t': self.psi.t},
                 order="C",
             )
 
