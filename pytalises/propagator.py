@@ -252,7 +252,7 @@ class Propagator:
         np.einsum(
             "xyz,xyzi->xyzi",
             ne.evaluate(
-                "exp(1j*alpha*delta_t*(kx**2+ky**2+kz**2))",
+                "exp(-1j*alpha*delta_t*(kx**2+ky**2+kz**2))",
                 local_dict={
                     "kx": self.psi.kmesh[0],
                     "ky": self.psi.kmesh[1],
