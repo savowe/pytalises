@@ -208,7 +208,7 @@ class Propagator:
             "xyzij,xyzj,xyzkj,xyzk->xyzi",
             self.V_eval_array,
             ne.evaluate(
-                "exp(1j*eigval*delta_t)",
+                "exp(-1j*eigval*delta_t)",
                 local_dict={"eigval": self.V_eval_eigval_array, "delta_t": delta_t},
             ),
             np.conjugate(self.V_eval_array),
@@ -231,7 +231,7 @@ class Propagator:
         np.einsum(
             "xyzii,xyzi->xyzi",
             ne.evaluate(
-                "exp(1j*V*delta_t)",
+                "exp(-1j*V*delta_t)",
                 local_dict={"V": self.V_eval_array, "delta_t": delta_t},
             ),
             self.psi._amp,
@@ -252,7 +252,7 @@ class Propagator:
         np.einsum(
             "xyz,xyzi->xyzi",
             ne.evaluate(
-                "exp(1j*alpha*delta_t*(kx**2+ky**2+kz**2))",
+                "exp(-1j*alpha*delta_t*(kx**2+ky**2+kz**2))",
                 local_dict={
                     "kx": self.psi.kmesh[0],
                     "ky": self.psi.kmesh[1],
