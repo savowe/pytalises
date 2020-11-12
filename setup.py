@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="pytalises",
-    version="0.2.2",
+    version="0.2.3",
 
     description="""
       TALISES (This Ain't a LInear Schrödinger Equation Solver) is an easy-to-use Python implementation
