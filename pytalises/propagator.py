@@ -201,7 +201,6 @@ class Propagator:
         elements.
         """
         if self.v.static is False:
-            print("potential is time-dependent")
             self.eval_V()
             get_eig(self.V_eval_array, self.V_eval_eigval_array)
         np.einsum(
