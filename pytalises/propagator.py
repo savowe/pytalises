@@ -173,6 +173,9 @@ class Propagator:
         set_num_threads(num_of_threads)
         ne.set_num_threads(num_of_threads)
         self.psi.construct_FFT(num_of_threads, FFTWflags)
+        # Chose method for calculating time propgation
+        # If potential is nondiagonal, additional
+        # numeric diangonalization will be performed
         if self.v.diag is True:
             self.prop_method = self.diag_potential_prop
         else:
@@ -181,8 +184,10 @@ class Propagator:
         # precompute the potential grid V(x,y,z) to use it
         # for all following calculations
         if self.v.static is True:
-            self.eval_V()
+            if self.v.diag is True:
+                self.eval_diag_V()
             if self.v.diag is False:
+                self.eval_V()
                 get_eig(self.V_eval_array, self.V_eval_eigval_array)
 
     def potential_prop(self, delta_t):
