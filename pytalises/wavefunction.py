@@ -279,9 +279,9 @@ class Wavefunction:
             for i in range(self.num_int_dim):
                 state_occupation[i] = self.state_occupation(i)
         else:
-            state_occupation = np.sum(np.abs(self.amp[:, nth_state]) ** 2) * np.prod(
-                self.delta_r, where=np.where(self.axes, True, False)
-            )
+            state_occupation = np.sum(
+                np.abs(self._amp[:, :, :, nth_state]) ** 2
+            ) * np.prod(self.delta_r, where=np.where(self.axes, True, False))
         return state_occupation
 
     def freely_propagate(
