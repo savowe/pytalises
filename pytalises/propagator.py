@@ -20,7 +20,7 @@ def propagate(psi, potential, num_time_steps, delta_t, **kwargs):
     potential : string list of strings
         This list contains the matrix elements of the potential term V
         in string format. If the potential has nondiagonal elements
-        (see optional parameter diag) earch elements represents
+        (see optional parameter diag) each elements represents
         one matrix element of the lower triangular part of V.
         For example a 3x3 potential with nondiagonal elements would be
         of form potential=[H00, H10, H20, H11, H21, H22].
@@ -29,7 +29,7 @@ def propagate(psi, potential, num_time_steps, delta_t, **kwargs):
         look like potential=[H00,H11,H22].
     num_time_steps : int
         Number of times the wavefunction is propagated by time delta_t
-        using the Split-Steo Fourier method.
+        using the Split-Step Fourier method.
     delta_t : float
         Time increment the wavefunction is propagated in one time step.
     variables : dict, optional
@@ -37,7 +37,7 @@ def propagate(psi, potential, num_time_steps, delta_t, **kwargs):
         in potential
     diag : bool , optional
         If true, no numerical diagonalization has to be invoked in order
-        to calculate time-propagation as nondiagonal elements are ommited.
+        to calculate time-propagation as nondiagonal elements are omitted.
         This makes the computation much faster. Default is False.
     num_of_threads : int, optional
         Number of threads uses for calculation. Default behaviour
@@ -82,7 +82,7 @@ def freely_propagate(
         The Wavefunction object the Propagator class acts on
     num_time_steps : int
         Number of times the wavefunction is propagated by time delta_t
-        using the Split-Steo Fourier method.
+        using the Split-Step Fourier method.
     delta_t : float
         Time increment the wavefunction is propagated in one time step.
     num_of_threads : int, optional
@@ -117,7 +117,7 @@ class Propagator:
     potential : list of strings
         This list contains the matrix elements of the potential term V
         in string format. If the potential has nondiagonal elements
-        (see optional parameter diag) earch elements represents
+        (see optional parameter diag) each elements represents
         one matrix element of the lower triangular part of V.
         For example a 3x3 potential with nondiagonal elements would be
         of form potential=[H00, H10, H20, H11, H21, H22].
@@ -202,7 +202,7 @@ class Propagator:
         """
         Calculate exp(i*V/hbar*delta_t)*Psi using numerical diagonalization.
 
-        This method has to be used if the potential mmatrix has nondiagonal
+        This method has to be used if the potential matrix has nondiagonal
         elements.
         """
         if self.v.static is False:
