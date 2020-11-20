@@ -16,12 +16,12 @@
 ### Documentation
 Read the [documentation](https://pytalises.readthedocs.io/en/latest/) to learn more about pytalises' capabilities.
 The documentation features many examples, among others
-[2D harmonic potentials](https://pytalises.readthedocs.io/en/dev/examples.html#2D-harmonic-potential), 
-[BEC scattering](https://pytalises.readthedocs.io/en/dev/examples.html#Nonlinear-interactions-between-internal-states), 
-[three-level Raman transitions](https://pytalises.readthedocs.io/en/dev/additional_examples.html#Three-level-Raman-transitions), 
-[single-Bragg diffraction](https://pytalises.readthedocs.io/en/dev/additional_examples.html#Single-Bragg-diffraction) 
+[2D harmonic potentials](https://pytalises.readthedocs.io/en/latest/examples.html#2D-harmonic-potential), 
+[BEC scattering](https://pytalises.readthedocs.io/en/latest/examples.html#Nonlinear-interactions-between-internal-states), 
+[three-level Raman transitions](https://pytalises.readthedocs.io/en/latest/additional_examples.html#Three-level-Raman-transitions), 
+[single-Bragg diffraction](https://pytalises.readthedocs.io/en/latest/additional_examples.html#Single-Bragg-diffraction) 
 and
-[atom interferometry](https://pytalises.readthedocs.io/en/dev/additional_examples.html#Light-pulse-atom-interferometry-with-single-Bragg-diffraction).
+[atom interferometry](https://pytalises.readthedocs.io/en/latest/additional_examples.html#Light-pulse-atom-interferometry-with-single-Bragg-diffraction).
 
 
 
