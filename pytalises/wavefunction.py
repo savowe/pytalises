@@ -267,6 +267,31 @@ class Wavefunction:
             exp_pos *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
         return exp_pos
 
+    def var_pos(self, axis=None):
+        """
+        Calculate the variance on given axis.
+
+        Calculates the variance in position of Psi on chosen axis.
+        Axes 0,1,2 correspond to x,y,z. The other two axes
+        are traced out. If no axis iv given returns array
+        of variance position of all external degrees of freedom.
+        """
+        if axis is None:
+            var_pos = np.empty((self.num_ext_dim))
+            for i in range(self.num_ext_dim):
+                var_pos[i] = self.var_pos(i)
+        else:
+            axes_to_trace = [0, 1, 2]
+            i = axis
+            axis = axes_to_trace.pop(axis)
+            psi_sq_amp = np.power(np.abs(self._amp), 2)
+            traced_out_psi = np.sum(psi_sq_amp, axis=tuple(axes_to_trace))
+            var_pos = np.einsum(
+                "ri,r->", traced_out_psi, (self._r[axis] - self.exp_pos(i)) ** 2
+            )
+            var_pos *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
+        return var_pos
+
     def normalize_to(self, n_const):
         """
         Normalize the wave function.
