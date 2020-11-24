@@ -387,9 +387,11 @@ class Wavefunction:
 
 
 def assert_type_or_list_of_type(argument, wished_type):
-    assert type(argument) is wished_type or type(argument) is list,\
-        "{} is not {} or list of {}.".format(argument, wished_type, wished_type)
+    assert (
+        type(argument) is wished_type or type(argument) is list
+    ), "{} is not {} or list of {}.".format(argument, wished_type, wished_type)
     if type(argument) is list:
         for argument_element in argument:
-            assert type(argument_element) is wished_type,\
-                "{} is not {} or list of {}.".format(argument, wished_type, wished_type)
+            assert (
+                type(argument_element) is wished_type
+            ), "{} is not {} or list of {}.".format(argument, wished_type, wished_type)
