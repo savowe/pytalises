@@ -103,22 +103,36 @@ class Wavefunction:
         normalize_const=None,
     ):
         """Initialize Wavefunction."""
+        # It follows a series of checks if arguments are valid
+        assert_type_or_list_of_type(psi, str)
         if type(psi) is not list and type(psi) is str:
             psi = [psi]
+        if type(number_of_grid_points) is int:
+            number_of_grid_points = (number_of_grid_points,)
+        assert_type_or_list_of_type(number_of_grid_points, tuple)
         if type(spatial_ext) is not list and type(spatial_ext) is tuple:
             spatial_ext = [spatial_ext]
+        assert_type_or_list_of_type(spatial_ext, tuple)
+        assert type(t0) is float, "t0 is no float"
+        assert type(m) is float, "m is no float"
+        assert type(variables) is dict, "variables is no dict"
+        # Argument check passed.
+        # It follows generation of internal variables
+        ## number of internal dims is number of provided strings to psi arg
         self.num_int_dim = len(psi)
-        self.num_ext_dim = sum([1 for n in number_of_grid_points if n > 0])
-        assert isinstance(number_of_grid_points, tuple)
+        ## number of external dims is number of ints in
+        ## number_of_grid_points that is > 1
         for _ in range(3 - len(number_of_grid_points)):
             number_of_grid_points += (1,)
+        self.num_ext_dim = sum([1 for n in number_of_grid_points if n > 1])
         self.nX, self.nY, self.nZ = number_of_grid_points
         self.number_of_grid_points = number_of_grid_points
         self.spatial_ext = spatial_ext
-        assert self.num_ext_dim == len(spatial_ext)
-        for _ in range(3 - len(spatial_ext)):
-            spatial_ext += ((0, 0),)
+        for _ in range(3 - len(self.spatial_ext)):
+            self.spatial_ext += ((0, 0),)
         self.axes = tuple(np.where(np.array(number_of_grid_points) > 1, 1, 0))
+        # Generation of variables that describe the domain
+        # of the wave functionin position and momentum space
         r = []
         Delta_r = []
         k = []
@@ -158,6 +172,7 @@ class Wavefunction:
         self.psi = psi
         self.t = t0
         self.m = m
+        ## alpha is the diffusion factor in the kinetic operator
         self.alpha = 1.054571817e-34 / (2 * self.m)
         self.default_var_dict = {
             "alpha": self.alpha,
@@ -165,6 +180,8 @@ class Wavefunction:
             "y": self.rmesh[1],
             "z": self.rmesh[2],
         }
+        # Define the variables that are used in the evaluation of the potentials
+        # during time propagation using the numexpr library
         for i in range(self.num_int_dim):
             self.default_var_dict["psi" + str(i)] = self._amp[:, :, :, i]
         self.variables = variables
@@ -367,3 +384,12 @@ class Wavefunction:
         pytalises.propagator.propagate(
             self, potential, num_time_steps, delta_t, **kwargs
         )
+
+
+def assert_type_or_list_of_type(argument, wished_type):
+    assert type(argument) is wished_type or type(argument) is list,\
+        "{} is not {} or list of {}.".format(argument, wished_type, wished_type)
+    if type(argument) is list:
+        for argument_element in argument:
+            assert type(argument_element) is wished_type,\
+                "{} is not {} or list of {}.".format(argument, wished_type, wished_type)
