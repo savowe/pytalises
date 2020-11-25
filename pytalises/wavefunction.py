@@ -118,10 +118,10 @@ class Wavefunction:
         assert type(variables) is dict, "variables is no dict"
         # Argument check passed.
         # It follows generation of internal variables
-        ## number of internal dims is number of provided strings to psi arg
+        # number of internal dims is number of provided strings to psi arg
         self.num_int_dim = len(psi)
-        ## number of external dims is number of ints in
-        ## number_of_grid_points that is > 1
+        # number of external dims is number of ints in
+        # number_of_grid_points that is > 1
         for _ in range(3 - len(number_of_grid_points)):
             number_of_grid_points += (1,)
         self.num_ext_dim = sum([1 for n in number_of_grid_points if n > 1])
@@ -172,7 +172,7 @@ class Wavefunction:
         self.psi = psi
         self.t = t0
         self.m = m
-        ## alpha is the diffusion factor in the kinetic operator
+        # alpha is the diffusion factor in the kinetic operator
         self.alpha = 1.054571817e-34 / (2 * self.m)
         self.default_var_dict = {
             "alpha": self.alpha,
