@@ -81,3 +81,42 @@ def test_free_propagation_of_gaussian_wave_packet():
                 psi.exp_pos(), x0 + hbar / m * k0 * psi.t, decimal=2
             )
             psi.freely_propagate(num_time_steps=1, delta_t=1)
+
+
+def test_two_dimensional_harmonic_oscillator():
+    """
+    Tests if the center of mass of a gaussian wave packet in
+    an harmonic oscillator moves as expected.
+    """
+
+    x0_select = [0, 0.5]
+    y0_select = [0.5, 1.5]
+    omega_x_select = [2 * np.pi * 0.8]
+    omega_y_select = [0, 2 * np.pi * 1]
+
+    cases = itertools.product(x0_select, y0_select, omega_x_select, omega_y_select)
+
+    for case in cases:
+        x0, y0, omega_x, omega_y = case
+        psi = pt.Wavefunction(
+            ["exp(-((x-x0)/(2*1))**2)*exp(-((y-y0)/(2*1))**2)"],
+            (128, 128),
+            [(-7.5, 7.5), (-7.5, 7.5)],
+            normalize_const=1.0,
+            variables={"x0": x0, "y0": y0},
+        )
+        time = 2 * np.pi / omega_x
+        n_steps = 10
+        for _ in range(n_steps):
+            psi.propagate(
+                "1/2*omega_x**2*x**2 + 1/2*omega_y**2*y**2",
+                variables={"omega_x": omega_x, "omega_y": omega_y},
+                diag=True,
+                num_time_steps=10,
+                delta_t=1 / 10 * time / n_steps,
+            )
+            np.testing.assert_almost_equal(
+                psi.exp_pos(),
+                np.array([x0 * np.cos(omega_x * psi.t), y0 * np.cos(omega_y * psi.t)]),
+                decimal=1,
+            )
