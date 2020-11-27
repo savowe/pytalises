@@ -15,9 +15,9 @@ jobs:
       language: shell       # 'language: python' is an error on Travis CI Windows
 
 install:
-    - pip install flake8
-    - pip install pytest
-    - pip install .
+    - pip3 install flake8
+    - pip3 install pytest
+    - pip3 install .
 script:
     - flake8 pytalises
     - pytest
