@@ -24,3 +24,4 @@ install:
 script:
     - flake8 pytalises
     - pytest
+    - python3 -m pytalises.tests
