@@ -29,7 +29,7 @@ Installing pytalises
 ====================
 **We recommend installing pytalises via conda**
 
-_Note from 2020/11/27_: the new Python 3.9 release is currently not supported by the numba libary. [They plan to implement a working version mid December](https://github.com/numba/numba/issues/6332). So long just use Python 3.6-3.8 with pytalises.
+_Note from 2020/11/27_: the new Python 3.9 release is currently not supported by the numba libary. [They plan to implement a working version early 2021](https://github.com/numba/numba/issues/6345#issuecomment-738696458). So long just use Python 3.6-3.8 with pytalises.
 
 #### Using conda
 
