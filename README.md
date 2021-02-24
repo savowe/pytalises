@@ -1,3 +1,4 @@
+[![Downloads](https://img.shields.io/conda/dn/conda-forge/pytalises)
 [![PyPI](https://img.shields.io/pypi/v/pytalises?color=blue)](https://pypi.org/project/pytalises/)
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/pytalises?color=blue&label=conda-forge)](https://anaconda.org/conda-forge/pytalises)
 [![Build Status](https://travis-ci.com/savowe/pytalises.svg?token=nZF2LbDmAxqpxqs5m7HE&branch=master)](https://travis-ci.com/savowe/pytalises)
@@ -42,7 +43,7 @@ conda config --add channels conda-forge
 Once the `conda-forge` channel has been enabled, `pytalises` can be installed with:
 
 ```
-conda install pytalises
+conda install pytalises=0.2.7
 ```
 
 
@@ -51,7 +52,7 @@ conda install pytalises
 pytalises is available on the Python Package Index and can be installed via
 
 ```
-pip install pytalises
+pip install pytalises==0.2.7
 ```
 
 it has dependencies via `scipy` and `numba` on BLAS and LAPACK libraries that are not always found on windows systems. For linux they can usually be located.
