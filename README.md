@@ -4,6 +4,8 @@
 [![Build Status](https://travis-ci.com/savowe/pytalises.svg?token=nZF2LbDmAxqpxqs5m7HE&branch=master)](https://travis-ci.com/savowe/pytalises)
 [![Documentation Status](https://readthedocs.org/projects/pytalises/badge/?version=latest)](https://pytalises.readthedocs.io/en/latest/?badge=latest)
 
+![additional_examples_54_0](https://user-images.githubusercontent.com/38558793/119370320-713f2c00-bcb5-11eb-94e5-cc801abcd7d8.png)
+
 # pyTALISES
 
 **pyTALISES** (This Ain't a LInear Schrödinger Equation Solver) is an easy-to-use Python implementation of the Split-Step Fourier Method, for numeric calculation of a wave function's time-propagation under the Schrödinger equation.
@@ -57,5 +59,3 @@ pip install pytalises==0.2.7
 ```
 
 it has dependencies via `scipy` and `numba` on BLAS and LAPACK libraries that are not always found on windows systems. For linux they can usually be located.
-
-![additional_examples_54_0](https://user-images.githubusercontent.com/38558793/119370320-713f2c00-bcb5-11eb-94e5-cc801abcd7d8.png)
