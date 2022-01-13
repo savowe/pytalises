@@ -31,6 +31,6 @@ setup(
         "Operating System :: OS Independent",
         "Topic :: Scientific/Engineering :: Physics",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.8",
     zip_safe=False,
 )
