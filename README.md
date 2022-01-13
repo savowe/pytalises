@@ -4,8 +4,6 @@
 [![Build Status](https://travis-ci.com/savowe/pytalises.svg?token=nZF2LbDmAxqpxqs5m7HE&branch=master)](https://travis-ci.com/savowe/pytalises)
 [![Documentation Status](https://readthedocs.org/projects/pytalises/badge/?version=latest)](https://pytalises.readthedocs.io/en/latest/?badge=latest)
 
-![additional_examples_54_0](https://user-images.githubusercontent.com/38558793/119370320-713f2c00-bcb5-11eb-94e5-cc801abcd7d8.png)
-
 # pyTALISES
 
 **pyTALISES** (This Ain't a LInear Schrödinger Equation Solver) is an easy-to-use Python implementation of the Split-Step Fourier Method, for numeric calculation of a wave function's time-propagation under the Schrödinger equation.
@@ -31,9 +29,6 @@ and
 
 Installing pytalises
 ====================
-**We recommend installing pytalises via conda**
-
-_Note from 2020/11/27_: the new Python 3.9 release is currently not supported by the numba libary. [They plan to implement a working version early 2021](https://github.com/numba/numba/issues/6345#issuecomment-738696458). So long just use Python 3.6-3.8 with pytalises.
 
 #### Using conda
 
