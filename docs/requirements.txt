@@ -1,8 +1,4 @@
-numpy>=1.19
-scipy>=1.5
-numba>=0.50
-numexpr>=2.7
-pyfftw>=0.12
-nbsphinx
-ipython
-pygments>=2.4
+-c ../requirements-constraints.txt
+nbsphinx>=0.9.4
+ipython>=8.12
+pygments>=2.10
