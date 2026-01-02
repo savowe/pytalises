@@ -1,7 +1,8 @@
 [![Downloads](https://img.shields.io/conda/dn/conda-forge/pytalises)](https://pypi.org/project/pytalises/)
 [![PyPI](https://img.shields.io/pypi/v/pytalises?color=blue)](https://pypi.org/project/pytalises/)
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/pytalises?color=blue&label=conda-forge)](https://anaconda.org/conda-forge/pytalises)
-[![Build Status](https://travis-ci.com/savowe/pytalises.svg?token=nZF2LbDmAxqpxqs5m7HE&branch=master)](https://travis-ci.com/savowe/pytalises)
+[![CI Status](https://github.com/savowe/pytalises/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/savowe/pytalises/actions/workflows/ci.yml)
+[![Release Status](https://github.com/savowe/pytalises/actions/workflows/python-publish.yml/badge.svg?branch=master)](https://github.com/savowe/pytalises/actions/workflows/python-publish.yml)
 [![Documentation Status](https://readthedocs.org/projects/pytalises/badge/?version=latest)](https://pytalises.readthedocs.io/en/latest/?badge=latest)
 
 ![additional_examples_54_0](https://user-images.githubusercontent.com/38558793/119370320-713f2c00-bcb5-11eb-94e5-cc801abcd7d8.png)
