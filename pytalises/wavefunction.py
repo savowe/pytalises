@@ -1,6 +1,11 @@
 """The Wavefunction class and its attributes."""
 
+from __future__ import annotations
+
+from typing import Any
+
 import numpy as np
+from numpy.typing import NDArray
 import pyfftw
 import numexpr as ne
 import pytalises.propagator
@@ -11,7 +16,7 @@ class Wavefunction:
     Class describing wave function.
 
     Parameters
-    ------------------
+    ----------
     psi : string list of strings
         Each string describes the initial amplitude in r-space of
         the wave function. The number of elements is the number
@@ -42,7 +47,7 @@ class Wavefunction:
         `normalize_const`
 
     Attributes
-    ------------------
+    ----------
     num_int_dim : int
         The number of internal degrees of freedom
     num_ex_dim : int
@@ -55,7 +60,7 @@ class Wavefunction:
         through definition of spatial_ext and number_of_grid_points
 
     Examples
-    ------------------
+    --------
     Wavefunction with two internal states
     where the first state is gaussian
     distributed in 1d r-space and the second
@@ -94,15 +99,17 @@ class Wavefunction:
 
     def __init__(
         self,
-        psi,
-        number_of_grid_points,
-        spatial_ext,
-        t0=0.0,
-        m=1.054571817e-34,
-        variables={},
-        normalize_const=None,
-    ):
+        psi: str | list[str],
+        number_of_grid_points: tuple[int, ...] | int,
+        spatial_ext: list[tuple[float, float]] | tuple[float, float],
+        t0: float = 0.0,
+        m: float = 1.054571817e-34,
+        variables: dict[str, Any] | None = None,
+        normalize_const: float | None = None,
+    ) -> None:
         """Initialize Wavefunction."""
+        if variables is None:
+            variables = {}
         # It follows a series of checks if arguments are valid
         assert_type_or_list_of_type(psi, str)
         if type(psi) is not list and type(psi) is str:
@@ -198,12 +205,12 @@ class Wavefunction:
 
     def construct_FFT(
         self,
-        num_of_threads=1,
-        FFTWflags=(
+        num_of_threads: int = 1,
+        FFTWflags: tuple[str, ...] = (
             "FFTW_ESTIMATE",
             "FFTW_DESTROY_INPUT",
         ),
-    ):
+    ) -> None:
         """Construct pyfftw bindings."""
         axes = tuple(i for i in range(self.num_ext_dim))
         pyfftw.config.NUM_THREADS = num_of_threads
@@ -225,7 +232,7 @@ class Wavefunction:
         )
 
     @property
-    def r(self):
+    def r(self) -> NDArray[np.floating[Any]] | list[NDArray[np.floating[Any]]]:
         """(list of) array of the wave function position axes."""
         if self.num_ext_dim == 1:
             return self._r[self.axes.index(1)]
@@ -233,25 +240,25 @@ class Wavefunction:
             return self._r
 
     @property
-    def k(self):
-        """(list of) array of the wave function position axes."""
+    def k(self) -> NDArray[np.floating[Any]] | list[NDArray[np.floating[Any]]]:
+        """(list of) array of the wave function momentum axes."""
         if self.num_ext_dim == 1:
             return self._k[self.axes.index(1)]
         else:
             return self._k
 
     @property
-    def amp(self):
+    def amp(self) -> NDArray[np.complexfloating[Any, Any]]:
         """Ndarray of the wave function amplitudes."""
         return np.squeeze(self._amp)
 
-    def exp_pos(self, axis=None):
+    def exp_pos(self, axis: int | None = None) -> NDArray[np.floating[Any]]:
         """
         Calculate the expected position on given axis.
 
         Calculates the mean position of Psi on chosen axis.
         Axes 0,1,2 correspond to x,y,z. The other two axes
-        are traced out. If no axis iv given returns array
+        are traced out. If no axis is given returns array
         of mean position of all external degrees of freedom.
         """
         if axis is None:
@@ -267,13 +274,13 @@ class Wavefunction:
             exp_pos *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
         return exp_pos
 
-    def var_pos(self, axis=None):
+    def var_pos(self, axis: int | None = None) -> NDArray[np.floating[Any]]:
         """
         Calculate the variance on given axis.
 
         Calculates the variance in position of Psi on chosen axis.
         Axes 0,1,2 correspond to x,y,z. The other two axes
-        are traced out. If no axis iv given returns array
+        are traced out. If no axis is given returns array
         of variance position of all external degrees of freedom.
         """
         if axis is None:
@@ -292,7 +299,7 @@ class Wavefunction:
             var_pos *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
         return var_pos
 
-    def normalize_to(self, n_const):
+    def normalize_to(self, n_const: float) -> None:
         """
         Normalize the wave function.
 
@@ -307,7 +314,9 @@ class Wavefunction:
         s *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
         self._amp *= np.sqrt(n_const / s)
 
-    def state_occupation(self, nth_state=None):
+    def state_occupation(
+        self, nth_state: int | None = None
+    ) -> NDArray[np.floating[Any]]:
         """
         Return occupation number of nth internal state.
 
@@ -328,14 +337,14 @@ class Wavefunction:
 
     def freely_propagate(
         self,
-        num_time_steps,
-        delta_t,
-        num_of_threads=1,
-        FFTWflags=(
+        num_time_steps: int,
+        delta_t: float,
+        num_of_threads: int = 1,
+        FFTWflags: tuple[str, ...] = (
             "FFTW_ESTIMATE",
             "FFTW_DESTROY_INPUT",
         ),
-    ):
+    ) -> None:
         """
         Propagates the Wavefunction object in time with V=0.
 
@@ -343,7 +352,7 @@ class Wavefunction:
         is present.
 
         Parameters
-        ------------------
+        ----------
         num_time_steps : int
             Number of times the wavefunction is propagated by time delta_t
             using the Split-Step Fourier method.
@@ -356,14 +365,20 @@ class Wavefunction:
             ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
 
         References
-        --------
+        ----------
         [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
         """
         pytalises.propagator.freely_propagate(
             self, num_time_steps, delta_t, num_of_threads, FFTWflags
         )
 
-    def propagate(self, potential, num_time_steps, delta_t, **kwargs):
+    def propagate(
+        self,
+        potential: str | list[str],
+        num_time_steps: int,
+        delta_t: float,
+        **kwargs: Any,
+    ) -> None:
         """
         Propagates the Wavefunction object in time.
 
@@ -371,7 +386,7 @@ class Wavefunction:
         Split-Step Fourier method [1].
 
         Parameters
-        ------------------
+        ----------
         potential : string list of strings
             This list contains the matrix elements of the potential term V
             in string format. If the potential has nondiagonal elements
@@ -402,7 +417,7 @@ class Wavefunction:
             ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
 
         References
-        --------
+        ----------
         [1] https://en.wikipedia.org/wiki/Split-step_method
         [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
         """
