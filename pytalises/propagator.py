@@ -1,12 +1,27 @@
 """Module containing functions that help propagating the Wavefunction class."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from numba import jit, prange, set_num_threads
 from numpy.linalg import eigh
 import numexpr as ne
 import numpy as np
+
+if TYPE_CHECKING:
+    from pytalises.wavefunction import Wavefunction
+
 import pytalises.wavefunction
 
 
-def propagate(psi, potential, num_time_steps, delta_t, **kwargs):
+def propagate(
+    psi: Wavefunction,
+    potential: str | list[str],
+    num_time_steps: int,
+    delta_t: float,
+    **kwargs: Any,
+) -> None:
     """
     Propagates a Wavefunction object in time.
 
@@ -14,7 +29,7 @@ def propagate(psi, potential, num_time_steps, delta_t, **kwargs):
     Split-Step Fourier method [1].
 
     Parameters
-    ------------------
+    ----------
     psi : Wavefunction
         The Wavefunction object the Propagator class acts on
     potential : string list of strings
@@ -47,7 +62,7 @@ def propagate(psi, potential, num_time_steps, delta_t, **kwargs):
         ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
 
     References
-    --------
+    ----------
     [1] https://en.wikipedia.org/wiki/Split-step_method
     [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
@@ -61,15 +76,15 @@ def propagate(psi, potential, num_time_steps, delta_t, **kwargs):
 
 
 def freely_propagate(
-    psi,
-    num_time_steps,
-    delta_t,
-    num_of_threads=1,
-    FFTWflags=(
+    psi: Wavefunction,
+    num_time_steps: int,
+    delta_t: float,
+    num_of_threads: int = 1,
+    FFTWflags: tuple[str, ...] = (
         "FFTW_ESTIMATE",
         "FFTW_DESTROY_INPUT",
     ),
-):
+) -> None:
     """
     Propagates a Wavefunction object in time with V=0.
 
@@ -77,7 +92,7 @@ def freely_propagate(
     is present.
 
     Parameters
-    ------------------
+    ----------
     psi : Wavefunction
         The Wavefunction object the Propagator class acts on
     num_time_steps : int
@@ -92,7 +107,7 @@ def freely_propagate(
         ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
 
     References
-    --------
+    ----------
     [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
     U = Propagator(
@@ -111,7 +126,7 @@ class Propagator:
     Class for propagating instances of the Wavefunction class.
 
     Parameters
-    ------------------
+    ----------
     psi : Wavefunction
         The Wavefunction object the Propagator class acts on
     potential : list of strings
@@ -137,7 +152,7 @@ class Propagator:
         ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
 
     References
-    --------
+    ----------
     [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
     """
 
@@ -370,7 +385,7 @@ def get_eig(matrices, eigvals):
     and the eigenvalues in the array eigvals.
 
     Parameters
-    ------------------
+    ----------
     M : 3d array of (NxN) arrays
     eigvals : 3d array of 1d arrays with N elements
     """
