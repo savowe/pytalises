@@ -13,6 +13,8 @@ Quick mapping
 - ``num_time_steps`` -> ``steps``
 - ``delta_t`` -> ``dt``
 - ``num_of_threads`` / ``FFTWflags`` -> :class:`pytalises.PropagationOptions`
+- optional GPU execution -> ``PropagationOptions(backend="cupy")`` with
+  ``Wavefunction(..., backend="cupy")``
 
 Example (before)
 ----------------

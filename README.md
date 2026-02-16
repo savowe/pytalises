@@ -40,11 +40,12 @@ psi.propagate(
     steps=1000,
     dt=1e-6,
     variables={"Omega": 2.0, "Delta": 1.0},
-    options=pt.PropagationOptions(threads=4),
+    options=pt.PropagationOptions(backend="cupy", threads=4),
 )
 ```
 
 For migration details from the pre-v2 API, see `docs/source/v2_migration.rst`.
+CuPy support is optional and requires an NVIDIA CUDA environment.
 
 ### Documentation
 Read the [documentation](https://pytalises.readthedocs.io/en/latest/) to learn more about pytalises' capabilities.

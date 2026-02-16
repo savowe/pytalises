@@ -1,4 +1,9 @@
-from .backends import get_backend, register_backend, set_default_backend  # noqa
+from .backends import (  # noqa
+    get_backend,
+    has_cupy,
+    register_backend,
+    set_default_backend,
+)
 from .exceptions import (  # noqa
     BackendError,
     GridMismatchError,
