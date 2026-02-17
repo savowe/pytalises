@@ -40,7 +40,7 @@ jobs:
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_GPU_TYPE_ID: ${{ vars.RUNPOD_GPU_TYPE_ID != '' && vars.RUNPOD_GPU_TYPE_ID || 'NVIDIA GeForce RTX 4090' }}
-      RUNPOD_IMAGE_NAME: ${{ vars.RUNPOD_IMAGE_NAME != '' && vars.RUNPOD_IMAGE_NAME || 'runpod/pytorch' }}
+      RUNPOD_IMAGE_NAME: ${{ vars.RUNPOD_IMAGE_NAME != '' && vars.RUNPOD_IMAGE_NAME || 'runpod/pytorch:1.0.3-cu1290-torch290-ubuntu2204' }}
       RUNPOD_CLOUD_TYPE: ${{ vars.RUNPOD_CLOUD_TYPE != '' && vars.RUNPOD_CLOUD_TYPE || 'ALL' }}
       RUNPOD_VOLUME_MOUNT_PATH: ${{ vars.RUNPOD_VOLUME_MOUNT_PATH != '' && vars.RUNPOD_VOLUME_MOUNT_PATH || '/workspace' }}
       RUNPOD_MIN_VCPU: ${{ vars.RUNPOD_MIN_VCPU != '' && vars.RUNPOD_MIN_VCPU || '4' }}
@@ -60,6 +60,17 @@ jobs:
           set -euo pipefail
           test -n "${RUNPOD_API_KEY}" || { echo "Missing secret RUNPOD_API_KEY (set it in environment 'gpu-ci')."; exit 1; }
           test -n "${{ secrets.RUNPOD_SSH_PRIVATE_KEY }}" || { echo "Missing secret RUNPOD_SSH_PRIVATE_KEY (set it in environment 'gpu-ci')."; exit 1; }
+
+      - name: Validate RunPod image reference
+        run: |
+          set -euo pipefail
+          case "${RUNPOD_IMAGE_NAME}" in
+            *:*) ;;
+            *)
+              echo "RUNPOD_IMAGE_NAME must include an explicit tag (e.g. runpod/pytorch:1.0.3-cu1290-torch290-ubuntu2204)."
+              exit 1
+              ;;
+          esac
 
       - name: Install workflow dependencies
         run: |
