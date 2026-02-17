@@ -159,7 +159,7 @@ jobs:
 
           QUERY='query ($input: PodFilter) { pod(input: $input) { id desiredStatus runtime { ports { ip isIpPublic privatePort publicPort type } } } }'
 
-          for attempt in $(seq 1 90); do
+          for attempt in $(seq 1 30); do
             PAYLOAD=$(jq -n \
               --arg query "$QUERY" \
               --arg podId "$POD_ID" \
