@@ -89,7 +89,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          QUERY='mutation ($input: PodFindAndDeployOnDemandInput!) { podFindAndDeployOnDemand(input: $input) { id desiredStatus } }'
+          QUERY='mutation ($input: PodFindAndDeployOnDemandInput!) { podFindAndDeployOnDemand(input: $input) { id desiredStatus machine { podHostId } } }'
 
           PAYLOAD=$(jq -n \
             --arg query "$QUERY" \
@@ -138,17 +138,22 @@ jobs:
           fi
 
           POD_ID=$(echo "$RESPONSE" | jq -r '.data.podFindAndDeployOnDemand.id // empty')
+          POD_HOST_ID=$(echo "$RESPONSE" | jq -r '.data.podFindAndDeployOnDemand.machine.podHostId // empty')
           if [ -z "$POD_ID" ]; then
             echo "RunPod pod id missing in response"
             exit 1
           fi
 
           echo "pod_id=$POD_ID" >> "$GITHUB_OUTPUT"
+          if [ -n "$POD_HOST_ID" ]; then
+            echo "pod_host_id=$POD_HOST_ID" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Wait for SSH endpoint
         id: wait-ssh
         env:
           POD_ID: ${{ steps.create-pod.outputs.pod_id }}
+          POD_HOST_ID: ${{ steps.create-pod.outputs.pod_host_id }}
         run: |
           set -euo pipefail
 
@@ -188,13 +193,24 @@ jobs:
 
             STATUS=$(echo "$RESPONSE" | jq -r '.data.pod.desiredStatus // "UNKNOWN"')
 
-            HOST=$(echo "$RESPONSE" | jq -r '.data.pod.runtime.ports[]? | select(.privatePort == 22 and .publicPort != null and .ip != null) | .ip' | head -n1)
-            PORT=$(echo "$RESPONSE" | jq -r '.data.pod.runtime.ports[]? | select(.privatePort == 22 and .publicPort != null and .ip != null) | .publicPort' | head -n1)
+            HOST=$(echo "$RESPONSE" | jq -r '.data.pod.runtime.ports[]? | select((.privatePort | tostring) == "22" and .publicPort != null and .ip != null and (.isIpPublic == true or .isIpPublic == null)) | .ip' | head -n1)
+            PORT=$(echo "$RESPONSE" | jq -r '.data.pod.runtime.ports[]? | select((.privatePort | tostring) == "22" and .publicPort != null and .ip != null and (.isIpPublic == true or .isIpPublic == null)) | .publicPort' | head -n1)
 
             if [ -n "${HOST}" ] && [ -n "${PORT}" ] && [ "${HOST}" != "null" ] && [ "${PORT}" != "null" ]; then
               echo "ssh_host=$HOST" >> "$GITHUB_OUTPUT"
               echo "ssh_port=$PORT" >> "$GITHUB_OUTPUT"
-              echo "Found SSH endpoint: ${HOST}:${PORT}"
+              echo "ssh_user=root" >> "$GITHUB_OUTPUT"
+              echo "ssh_mode=public-ip" >> "$GITHUB_OUTPUT"
+              echo "Found public SSH endpoint: ${HOST}:${PORT}"
+              exit 0
+            fi
+
+            if [ "$STATUS" = "RUNNING" ] && [ -n "${POD_HOST_ID:-}" ]; then
+              echo "No public SSH endpoint yet; falling back to RunPod SSH proxy via ssh.runpod.io"
+              echo "ssh_host=ssh.runpod.io" >> "$GITHUB_OUTPUT"
+              echo "ssh_port=22" >> "$GITHUB_OUTPUT"
+              echo "ssh_user=$POD_HOST_ID" >> "$GITHUB_OUTPUT"
+              echo "ssh_mode=proxy" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
@@ -209,11 +225,14 @@ jobs:
         env:
           SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
           SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
+          SSH_USER: ${{ steps.wait-ssh.outputs.ssh_user }}
+          SSH_MODE: ${{ steps.wait-ssh.outputs.ssh_mode }}
         run: |
           set -euo pipefail
+          echo "Using SSH mode: ${SSH_MODE} (${SSH_USER}@${SSH_HOST}:${SSH_PORT})"
           for attempt in $(seq 1 30); do
             if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -i ~/.ssh/id_runpod -p "$SSH_PORT" root@"$SSH_HOST" 'echo connected'; then
+              -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" 'echo connected'; then
               exit 0
             fi
             echo "Attempt ${attempt}: waiting for SSH connectivity..."
@@ -226,16 +245,17 @@ jobs:
         env:
           SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
           SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
+          SSH_USER: ${{ steps.wait-ssh.outputs.ssh_user }}
         run: |
           set -euo pipefail
 
-          tar czf /tmp/pytalises-src.tgz --exclude=.git .
-          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -i ~/.ssh/id_runpod -P "$SSH_PORT" /tmp/pytalises-src.tgz \
-            root@"$SSH_HOST":/workspace/pytalises-src.tgz
+          tar czf - --exclude=.git . | \
+            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" \
+              'cat > /workspace/pytalises-src.tgz'
 
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -i ~/.ssh/id_runpod -p "$SSH_PORT" root@"$SSH_HOST" <<REMOTE
+            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" <<REMOTE
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
 
@@ -267,12 +287,12 @@ jobs:
         env:
           SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
           SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
+          SSH_USER: ${{ steps.wait-ssh.outputs.ssh_user }}
         run: |
           set -euo pipefail
-          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -i ~/.ssh/id_runpod -P "$SSH_PORT" \
-            root@"$SSH_HOST":/workspace/backend-benchmark.json \
-            /tmp/backend-benchmark.json
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" \
+            'cat /workspace/backend-benchmark.json' > /tmp/backend-benchmark.json
 
       - name: Add benchmark summary
         if: ${{ inputs.run_benchmarks }}
