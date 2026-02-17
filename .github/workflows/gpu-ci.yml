@@ -1,0 +1,59 @@
+name: GPU CI
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "pytalises/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/gpu-ci.yml"
+  pull_request:
+    paths:
+      - "pytalises/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/gpu-ci.yml"
+
+concurrency:
+  group: gpu-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cupy-tests:
+    name: CuPy backend tests (self-hosted GPU)
+    # Never run untrusted fork PR code on self-hosted GPU runners.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: [self-hosted, linux, x64, gpu, cuda]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Show GPU details
+        run: nvidia-smi
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[gpu]"
+          python -m pip install pytest
+
+      - name: Verify CuPy runtime
+        run: |
+          python - <<'PY'
+          import cupy as cp
+          print("CuPy version:", cp.__version__)
+          print("CUDA device count:", cp.cuda.runtime.getDeviceCount())
+          print("Device:", cp.cuda.runtime.getDeviceProperties(0)["name"].decode())
+          PY
+
+      - name: Run GPU-focused tests
+        run: |
+          pytest tests/backend_test.py tests/cupy_backend_test.py -q
