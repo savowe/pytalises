@@ -246,28 +246,34 @@ jobs:
           SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
           SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
           SSH_USER: ${{ steps.wait-ssh.outputs.ssh_user }}
+          SSH_MODE: ${{ steps.wait-ssh.outputs.ssh_mode }}
         run: |
           set -euo pipefail
 
-          tar czf - --exclude=.git . | \
-            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" \
-              'cat > /workspace/pytalises-src.tgz'
-
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" <<REMOTE
-          set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
-
-          if ! command -v python3 >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y python3 python3-pip git
+          SSH_TTY_FLAG=""
+          if [ "${SSH_MODE}" = "proxy" ]; then
+            SSH_TTY_FLAG="-tt"
           fi
 
-          mkdir -p /workspace/pytalises
-          tar xzf /workspace/pytalises-src.tgz -C /workspace/pytalises
+          ssh ${SSH_TTY_FLAG} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" <<REMOTE
+          set -euo pipefail
 
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "python3 is required in the selected RunPod image."
+            exit 1
+          fi
+          if ! command -v git >/dev/null 2>&1; then
+            echo "git is required in the selected RunPod image."
+            exit 1
+          fi
+
+          rm -rf /workspace/pytalises
+          git clone --depth 1 https://github.com/${GITHUB_REPOSITORY}.git /workspace/pytalises
           cd /workspace/pytalises
+          git fetch --depth 1 origin ${GITHUB_SHA}
+          git checkout --detach ${GITHUB_SHA}
+
           python3 -m pip install --upgrade pip
           python3 -m pip install -e ".[gpu]" pytest
           pytest tests/backend_test.py tests/cupy_backend_test.py -q
