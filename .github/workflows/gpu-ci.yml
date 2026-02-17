@@ -1,4 +1,4 @@
-name: GPU CI (On-demand)
+name: GPU CI (RunPod on-demand)
 
 on:
   workflow_dispatch:
@@ -20,99 +20,212 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  start-runner:
-    name: Start on-demand EC2 GPU runner
-    # Never start self-hosted infrastructure for untrusted fork PR code.
+  cupy-tests-runpod:
+    name: CuPy backend tests (RunPod)
+    # Never run external fork PR code on paid GPU infrastructure.
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
-    outputs:
-      label: ${{ steps.start-ec2-runner.outputs.label }}
-      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
-      region: ${{ steps.start-ec2-runner.outputs.region }}
+    timeout-minutes: 90
 
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Start EC2 runner
-        id: start-ec2-runner
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: start
-          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          ec2-image-id: ${{ secrets.EC2_GPU_AMI_ID }}
-          ec2-instance-type: ${{ vars.EC2_GPU_INSTANCE_TYPE != '' && vars.EC2_GPU_INSTANCE_TYPE || 'g5.xlarge' }}
-          subnet-id: ${{ secrets.EC2_SUBNET_ID }}
-          security-group-id: ${{ secrets.EC2_SECURITY_GROUP_ID }}
-          startup-timeout-minutes: 15
-          aws-resource-tags: >
-            [
-              {"Key": "Name", "Value": "pytalises-gpu-ci"},
-              {"Key": "Repository", "Value": "${{ github.repository }}"},
-              {"Key": "Workflow", "Value": "gpu-ci"}
-            ]
-
-  cupy-tests:
-    name: CuPy backend tests (on-demand GPU)
-    needs: start-runner
-    runs-on: ${{ needs.start-runner.outputs.label }}
-    timeout-minutes: 45
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_GPU_TYPE_ID: ${{ vars.RUNPOD_GPU_TYPE_ID != '' && vars.RUNPOD_GPU_TYPE_ID || 'NVIDIA GeForce RTX 4090' }}
+      RUNPOD_IMAGE_NAME: ${{ vars.RUNPOD_IMAGE_NAME != '' && vars.RUNPOD_IMAGE_NAME || 'runpod/pytorch' }}
+      RUNPOD_CLOUD_TYPE: ${{ vars.RUNPOD_CLOUD_TYPE != '' && vars.RUNPOD_CLOUD_TYPE || 'ALL' }}
+      RUNPOD_VOLUME_MOUNT_PATH: ${{ vars.RUNPOD_VOLUME_MOUNT_PATH != '' && vars.RUNPOD_VOLUME_MOUNT_PATH || '/workspace' }}
+      RUNPOD_MIN_VCPU: ${{ vars.RUNPOD_MIN_VCPU != '' && vars.RUNPOD_MIN_VCPU || '4' }}
+      RUNPOD_MIN_MEMORY_GB: ${{ vars.RUNPOD_MIN_MEMORY_GB != '' && vars.RUNPOD_MIN_MEMORY_GB || '15' }}
+      RUNPOD_VOLUME_GB: ${{ vars.RUNPOD_VOLUME_GB != '' && vars.RUNPOD_VOLUME_GB || '30' }}
+      RUNPOD_CONTAINER_DISK_GB: ${{ vars.RUNPOD_CONTAINER_DISK_GB != '' && vars.RUNPOD_CONTAINER_DISK_GB || '30' }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Show GPU details
-        run: nvidia-smi
-
-      - name: Install dependencies
+      - name: Validate required secrets
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[gpu]"
-          python -m pip install pytest
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY}" || { echo "Missing secret RUNPOD_API_KEY"; exit 1; }
+          test -n "${{ secrets.RUNPOD_SSH_PRIVATE_KEY }}" || { echo "Missing secret RUNPOD_SSH_PRIVATE_KEY"; exit 1; }
 
-      - name: Verify CuPy runtime
+      - name: Install workflow dependencies
         run: |
-          python - <<'PY'
-          import cupy as cp
-          print("CuPy version:", cp.__version__)
-          print("CUDA device count:", cp.cuda.runtime.getDeviceCount())
-          print("Device:", cp.cuda.runtime.getDeviceProperties(0)["name"].decode())
-          PY
+          sudo apt-get update
+          sudo apt-get install -y jq openssh-client
 
-      - name: Run GPU-focused tests
+      - name: Configure SSH key
         run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' '${{ secrets.RUNPOD_SSH_PRIVATE_KEY }}' > ~/.ssh/id_runpod
+          chmod 600 ~/.ssh/id_runpod
+
+      - name: Create RunPod on-demand pod
+        id: create-pod
+        run: |
+          set -euo pipefail
+
+          QUERY='mutation ($input: PodFindAndDeployOnDemandInput!) { podFindAndDeployOnDemand(input: $input) { id desiredStatus } }'
+
+          PAYLOAD=$(jq -n \
+            --arg query "$QUERY" \
+            --arg cloud "$RUNPOD_CLOUD_TYPE" \
+            --arg gpu "$RUNPOD_GPU_TYPE_ID" \
+            --arg image "$RUNPOD_IMAGE_NAME" \
+            --arg name "pytalises-gpu-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --arg mount "$RUNPOD_VOLUME_MOUNT_PATH" \
+            --arg ports "22/tcp" \
+            --arg minVcpu "$RUNPOD_MIN_VCPU" \
+            --arg minMem "$RUNPOD_MIN_MEMORY_GB" \
+            --arg vol "$RUNPOD_VOLUME_GB" \
+            --arg disk "$RUNPOD_CONTAINER_DISK_GB" \
+            '{
+              query: $query,
+              variables: {
+                input: {
+                  cloudType: $cloud,
+                  gpuCount: 1,
+                  gpuTypeId: $gpu,
+                  name: $name,
+                  imageName: $image,
+                  startSsh: true,
+                  supportPublicIp: true,
+                  ports: $ports,
+                  minVcpuCount: ($minVcpu | tonumber),
+                  minMemoryInGb: ($minMem | tonumber),
+                  volumeInGb: ($vol | tonumber),
+                  containerDiskInGb: ($disk | tonumber),
+                  volumeMountPath: $mount
+                }
+              }
+            }')
+
+          RESPONSE=$(curl --silent --show-error --fail \
+            --request POST \
+            --header 'content-type: application/json' \
+            --url "https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}" \
+            --data "$PAYLOAD")
+
+          echo "$RESPONSE" | jq .
+
+          if [ "$(echo "$RESPONSE" | jq '.errors | length // 0')" != "0" ]; then
+            echo "RunPod API returned errors while creating pod"
+            exit 1
+          fi
+
+          POD_ID=$(echo "$RESPONSE" | jq -r '.data.podFindAndDeployOnDemand.id // empty')
+          if [ -z "$POD_ID" ]; then
+            echo "RunPod pod id missing in response"
+            exit 1
+          fi
+
+          echo "pod_id=$POD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSH endpoint
+        id: wait-ssh
+        env:
+          POD_ID: ${{ steps.create-pod.outputs.pod_id }}
+        run: |
+          set -euo pipefail
+
+          QUERY='query ($input: PodFilterInput!) { pod(input: $input) { id desiredStatus runtime { ports { ip isIpPublic privatePort publicPort type } } } }'
+
+          for attempt in $(seq 1 90); do
+            PAYLOAD=$(jq -n \
+              --arg query "$QUERY" \
+              --arg podId "$POD_ID" \
+              '{query: $query, variables: {input: {podId: $podId}}}')
+
+            RESPONSE=$(curl --silent --show-error --fail \
+              --request POST \
+              --header 'content-type: application/json' \
+              --url "https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}" \
+              --data "$PAYLOAD")
+
+            STATUS=$(echo "$RESPONSE" | jq -r '.data.pod.desiredStatus // "UNKNOWN"')
+
+            HOST=$(echo "$RESPONSE" | jq -r '.data.pod.runtime.ports[]? | select(.privatePort == 22 and .publicPort != null and .ip != null) | .ip' | head -n1)
+            PORT=$(echo "$RESPONSE" | jq -r '.data.pod.runtime.ports[]? | select(.privatePort == 22 and .publicPort != null and .ip != null) | .publicPort' | head -n1)
+
+            if [ -n "${HOST}" ] && [ -n "${PORT}" ] && [ "${HOST}" != "null" ] && [ "${PORT}" != "null" ]; then
+              echo "ssh_host=$HOST" >> "$GITHUB_OUTPUT"
+              echo "ssh_port=$PORT" >> "$GITHUB_OUTPUT"
+              echo "Found SSH endpoint: ${HOST}:${PORT}"
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}: status=${STATUS}, waiting for SSH endpoint..."
+            sleep 10
+          done
+
+          echo "Timed out waiting for RunPod SSH endpoint"
+          exit 1
+
+      - name: Wait for SSH connectivity
+        env:
+          SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
+          SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -i ~/.ssh/id_runpod -p "$SSH_PORT" root@"$SSH_HOST" 'echo connected'; then
+              exit 0
+            fi
+            echo "Attempt ${attempt}: waiting for SSH connectivity..."
+            sleep 10
+          done
+          echo "SSH never became reachable"
+          exit 1
+
+      - name: Upload source and run GPU tests in pod
+        env:
+          SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
+          SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
+        run: |
+          set -euo pipefail
+
+          tar czf /tmp/pytalises-src.tgz --exclude=.git .
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_runpod -P "$SSH_PORT" /tmp/pytalises-src.tgz \
+            root@"$SSH_HOST":/workspace/pytalises-src.tgz
+
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_runpod -p "$SSH_PORT" root@"$SSH_HOST" <<'REMOTE'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+
+          if ! command -v python3 >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y python3 python3-pip git
+          fi
+
+          mkdir -p /workspace/pytalises
+          tar xzf /workspace/pytalises-src.tgz -C /workspace/pytalises
+
+          cd /workspace/pytalises
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e ".[gpu]" pytest
           pytest tests/backend_test.py tests/cupy_backend_test.py -q
+          REMOTE
 
-  stop-runner:
-    name: Stop on-demand EC2 GPU runner
-    needs:
-      - start-runner
-      - cupy-tests
-    if: ${{ always() && needs.start-runner.result == 'success' }}
-    runs-on: ubuntu-latest
+      - name: Terminate RunPod pod
+        if: ${{ always() && steps.create-pod.outputs.pod_id != '' }}
+        env:
+          POD_ID: ${{ steps.create-pod.outputs.pod_id }}
+        run: |
+          set -euo pipefail
 
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ needs.start-runner.outputs.region }}
+          QUERY='mutation ($input: PodTerminateInput!) { podTerminate(input: $input) }'
+          PAYLOAD=$(jq -n \
+            --arg query "$QUERY" \
+            --arg podId "$POD_ID" \
+            '{query: $query, variables: {input: {podId: $podId}}}')
 
-      - name: Stop EC2 runner
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: stop
-          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          label: ${{ needs.start-runner.outputs.label }}
-          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
+          RESPONSE=$(curl --silent --show-error --fail \
+            --request POST \
+            --header 'content-type: application/json' \
+            --url "https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}" \
+            --data "$PAYLOAD")
+
+          echo "$RESPONSE" | jq .
