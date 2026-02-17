@@ -1,4 +1,4 @@
-name: GPU CI
+name: GPU CI (On-demand)
 
 on:
   workflow_dispatch:
@@ -20,11 +20,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  cupy-tests:
-    name: CuPy backend tests (self-hosted GPU)
-    # Never run untrusted fork PR code on self-hosted GPU runners.
+  start-runner:
+    name: Start on-demand EC2 GPU runner
+    # Never start self-hosted infrastructure for untrusted fork PR code.
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: [self-hosted, linux, x64, gpu, cuda]
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start-ec2-runner.outputs.label }}
+      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+      region: ${{ steps.start-ec2-runner.outputs.region }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Start EC2 runner
+        id: start-ec2-runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: start
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          ec2-image-id: ${{ secrets.EC2_GPU_AMI_ID }}
+          ec2-instance-type: ${{ vars.EC2_GPU_INSTANCE_TYPE != '' && vars.EC2_GPU_INSTANCE_TYPE || 'g5.xlarge' }}
+          subnet-id: ${{ secrets.EC2_SUBNET_ID }}
+          security-group-id: ${{ secrets.EC2_SECURITY_GROUP_ID }}
+          startup-timeout-minutes: 15
+          aws-resource-tags: >
+            [
+              {"Key": "Name", "Value": "pytalises-gpu-ci"},
+              {"Key": "Repository", "Value": "${{ github.repository }}"},
+              {"Key": "Workflow", "Value": "gpu-ci"}
+            ]
+
+  cupy-tests:
+    name: CuPy backend tests (on-demand GPU)
+    needs: start-runner
+    runs-on: ${{ needs.start-runner.outputs.label }}
     timeout-minutes: 45
 
     steps:
@@ -57,3 +92,27 @@ jobs:
       - name: Run GPU-focused tests
         run: |
           pytest tests/backend_test.py tests/cupy_backend_test.py -q
+
+  stop-runner:
+    name: Stop on-demand EC2 GPU runner
+    needs:
+      - start-runner
+      - cupy-tests
+    if: ${{ always() && needs.start-runner.result == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ needs.start-runner.outputs.region }}
+
+      - name: Stop EC2 runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: stop
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          label: ${{ needs.start-runner.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
