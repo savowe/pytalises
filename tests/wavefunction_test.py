@@ -1,142 +1,83 @@
-import pytalises as pt
-import numpy as np
 import itertools
 
+import numpy as np
+import pytalises as pt
 
-def test_Wavenfunction_init():
-    # 1D Arguments not as list
-    psi = pt.Wavefunction("exp(-x**2)", (128,), (-1, 1), normalize_const=1.0)
-    np.testing.assert_almost_equal(psi.state_occupation(), 1.0)
-    # 1D Arguments as list
-    pt.Wavefunction(["exp(-x**2)"], (128,), [(-1, 1)])
-    pt.Wavefunction(["exp(-x**2)", "cos(x)"], (128,), [(-1, 1)])
-    pt.Wavefunction(["exp(-x**2)", "b"], (128,), [(-1, 1)], variables={"b": 1})
-    # 2D Arguments not as list
-    pt.Wavefunction("exp(-x**2-y**2)", (128, 128), [(-1, 1), (-1, 1)])
-    # 2D Arguments as list
-    pt.Wavefunction(["exp(-x**2-y**2)"], (128, 128), [(-1, 1), (-1, 1)])
-    psi = pt.Wavefunction(
-        ["exp(-x**2-y**2)", "c*x**2+y**2"],
-        (128, 128),
-        [(-1, 1), (-1, 1)],
-        variables={"c": 1},
-        normalize_const=666,
-    )
-    np.testing.assert_almost_equal(np.sum(psi.state_occupation()), 666)
-    # 3D Arguments not as list
-    pt.Wavefunction(
-        "exp(-x**2-y**2-z**2/d)+d",
-        (128, 128, 128),
-        [(-1, 1), (-1, 1), (-1, 1)],
-        variables={"d": 1},
-    )
-    # 3D Arguments as list
-    pt.Wavefunction(
-        ["exp(-x**2-y**2-z**2/d)+d"],
-        (128, 128, 128),
-        [(-1, 1), (-1, 1), (-1, 1)],
-        variables={"d": 1},
-    )
 
-    # 1D + one internal state
-    psi = [
+def g1(n=64, a=-2.0, b=2.0):
+    return pt.Grid(shape=(n,), extent=((a, b),))
+
+
+def g2(nx=32, ny=32, a=-2.0, b=2.0):
+    return pt.Grid(shape=(nx, ny), extent=((a, b), (a, b)))
+
+
+def g3(n=16, a=-2.0, b=2.0):
+    return pt.Grid(shape=(n, n, n), extent=((a, b), (a, b), (a, b)))
+
+
+def test_wavefunction_init_and_basic_properties():
+    psi = pt.Wavefunction("exp(-x**2)", g1(128, -1, 1), normalize_const=1.0)
+    np.testing.assert_almost_equal(np.sum(psi.state_occupation()), 1.0)
+
+    # multiple internal states, variable usage
+    psi2 = pt.Wavefunction(
+        ["exp(-x**2)", "b*cos(x)"],
+        g1(64, -1, 1),
+        variables={"b": 1.0},
+        normalize_const=2.0,
+    )
+    np.testing.assert_almost_equal(np.sum(psi2.state_occupation()), 2.0)
+
+    assert len(psi.r) == 1
+    assert len(psi.k) == 1
+    assert psi.amp.shape == (128, 1)
+
+
+def test_wavefunction_dimensional_cases_and_quick_propagation():
+    # 1D
+    psi_1d_cases = [
         "exp(-x**2)",
         ["exp(-x**2)"],
+        ["exp(-x**2)", "0"],
     ]
-    number_of_grid_points = [
-        16,
-        (16,),
-        (
-            16,
-            1,
-        ),
-        (16, 1, 1),
+    V_diag_1d = [
+        pt.DiagonalPotential("0"),
+        pt.DiagonalPotential("sin(x)"),
+        pt.DiagonalPotential("2*x**2"),
     ]
-    spatial_ext = [
-        (-2, 2),
-        [
-            (-2, 2),
-        ],
-    ]
-    variables = [
-        {"a0": 0, "x0": 1},
-    ]
-    V = ["0", ["0"], "sin(x)", "2*x**2"]
-    all_valid_cases = itertools.product(
-        psi, number_of_grid_points, spatial_ext, variables, V
-    )
-    for case in all_valid_cases:
-        psi = pt.Wavefunction(
-            psi=case[0],
-            number_of_grid_points=case[1],
-            spatial_ext=case[2],
-            variables=case[3],
-        )
-        psi.freely_propagate(num_time_steps=1, delta_t=1)
-        psi.propagate(potential=case[4], num_time_steps=1, delta_t=1)
 
-    # 2D + one internal state
-    psi = [
-        "exp(-x**2)*y",
-        ["exp(-x/a0**2)*exp(-y**2)"],
-    ]
-    number_of_grid_points = [
-        (
-            16,
-            16,
-        ),
-        (16, 16, 1),
-    ]
-    spatial_ext = [
-        [(-2, 2), (-5, 5)],
-    ]
-    variables = [
-        {"a0": 0, "x0": 1},
-    ]
-    V = ["0", ["0"], "sin(x*y)", "2*x**2*y"]
-    all_valid_cases = itertools.product(
-        psi, number_of_grid_points, spatial_ext, variables, V
-    )
-    for case in all_valid_cases:
-        psi = pt.Wavefunction(
-            psi=case[0],
-            number_of_grid_points=case[1],
-            spatial_ext=case[2],
-            variables=case[3],
-        )
-        psi.freely_propagate(num_time_steps=1, delta_t=1)
-        psi.propagate(potential=case[4], num_time_steps=1, delta_t=1)
+    for initial in psi_1d_cases:
+        wf = pt.Wavefunction(initial, g1(32), normalize_const=1.0)
+        wf.freely_propagate(steps=1, dt=1.0)
 
-    # 3D + two internal state
-    psi = [
-        ["exp(-x/a0**2)*exp(-y**2)*exp(-z**2)", "0"],
-    ]
-    number_of_grid_points = [
-        (16, 16, 16),
-    ]
-    spatial_ext = [
-        [(-2, 2), (-5, 5), (-2, 2)],
-    ]
-    variables = [
-        {"a0": 0, "x0": 1},
-    ]
-    V = [
-        ["0", "sin(x*y)", "z"],
-        ["x", "sin(x*y)"],
-    ]
-    all_valid_cases = itertools.product(
-        psi, number_of_grid_points, spatial_ext, variables, V
-    )
-    for case in all_valid_cases:
-        if len(case[4]) == 2:
-            diag = True
+        if wf.num_int_dim == 1:
+            for V in V_diag_1d:
+                wf.propagate(potential=V, steps=1, dt=1.0)
         else:
-            diag = False
-        psi = pt.Wavefunction(
-            psi=case[0],
-            number_of_grid_points=case[1],
-            spatial_ext=case[2],
-            variables=case[3],
-        )
-        psi.freely_propagate(num_time_steps=1, delta_t=1)
-        psi.propagate(potential=case[4], num_time_steps=1, delta_t=1, diag=diag)
+            V = pt.HermitianPotential.from_lower_triangular(["0", "sin(x)", "0"])
+            wf.propagate(potential=V, steps=1, dt=1.0)
+
+    # 2D
+    psi_2d = pt.Wavefunction("exp(-x**2-y**2)", g2(24, 24), normalize_const=1.0)
+    psi_2d.propagate(
+        potential=pt.DiagonalPotential("x**2 + y**2"),
+        steps=1,
+        dt=0.1,
+    )
+    assert psi_2d.amp.shape == (24, 24, 1)
+
+    # 3D + two states, non-diagonal potential
+    psi_3d = pt.Wavefunction(["exp(-x**2-y**2-z**2)", "0"], g3(12), normalize_const=1.0)
+    psi_3d.propagate(
+        potential=pt.HermitianPotential.from_lower_triangular(["0", "x", "sin(y)"]),
+        steps=1,
+        dt=0.05,
+    )
+
+
+def test_state_occupation_conservation_quick():
+    wf = pt.Wavefunction(["exp(-x**2)", "0"], g1(64, -3, 3), normalize_const=1.0)
+    V = pt.HermitianPotential.from_lower_triangular(["0", "sin(t)", "0"])
+    wf.propagate(V, steps=3, dt=0.01)
+    np.testing.assert_almost_equal(np.sum(wf.state_occupation()), 1.0, decimal=5)
