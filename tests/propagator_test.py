@@ -82,6 +82,19 @@ def test_time_dependent_nondiagonal_potential():
     np.testing.assert_almost_equal(np.sum(psi.state_occupation()), 1.0, decimal=5)
 
 
+def test_time_variable_is_dynamic_in_potential_evaluation():
+    psi = pt.Wavefunction("1.0", g1(64, -1, 1), t0=0.0)
+    amp_before = psi.amp.copy()
+    dt = 0.1
+    psi.propagate(potential=pt.DiagonalPotential("t"), steps=1, dt=dt)
+
+    # With Strang splitting, potential is evaluated after the first half-step
+    # kinetic propagation -> at t = dt/2.
+    expected_phase = np.exp(-1j * (dt / 2) * dt)
+    ratio = psi.amp[0, 0] / amp_before[0, 0]
+    np.testing.assert_allclose(ratio / expected_phase, 1.0, atol=1e-10)
+
+
 def test_multidimensional_wavefunction_properties():
     psi_2d = pt.Wavefunction(
         "exp(-x**2 - y**2)",

@@ -76,6 +76,24 @@ def test_wavefunction_dimensional_cases_and_quick_propagation():
     )
 
 
+def test_singleton_axes_are_treated_as_inactive_dimensions():
+    psi = pt.Wavefunction(
+        "exp(-y**2)",
+        pt.Grid(shape=(1, 64), extent=((0.0, 0.0), (-2.0, 2.0))),
+        normalize_const=1.0,
+    )
+
+    assert psi.num_ext_dim == 1
+    assert len(psi.r) == 1
+    assert psi.r[0].shape == (64,)
+
+    exp_all = psi.exp_pos()
+    np.testing.assert_allclose(exp_all, np.array([psi.exp_pos(axis=0)]))
+
+    # Ensure FFT plans are created on active axes only.
+    psi.freely_propagate(steps=1, dt=0.01)
+
+
 def test_state_occupation_conservation_quick():
     wf = pt.Wavefunction(["exp(-x**2)", "0"], g1(64, -3, 3), normalize_const=1.0)
     V = pt.HermitianPotential.from_lower_triangular(["0", "sin(t)", "0"])

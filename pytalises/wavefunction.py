@@ -71,9 +71,9 @@ class Wavefunction:
         self.number_of_grid_points = self.grid.padded_shape
         self.spatial_ext = list(self.grid.padded_extent)
 
-        self.num_ext_dim = self.grid.ndim
-        self.nX, self.nY, self.nZ = self.number_of_grid_points
         self.axes = tuple(1 if n > 1 else 0 for n in self.number_of_grid_points)
+        self.num_ext_dim = int(sum(self.axes))
+        self.nX, self.nY, self.nZ = self.number_of_grid_points
 
         r: list[NDArray[np.floating[Any]]] = []
         Delta_r: list[float] = []
@@ -122,7 +122,6 @@ class Wavefunction:
             "x": self.rmesh[0],
             "y": self.rmesh[1],
             "z": self.rmesh[2],
-            "t": self.t,
         }
         for i in range(self.num_int_dim):
             self.default_var_dict[f"psi{i}"] = self._amp[:, :, :, i]
@@ -132,6 +131,7 @@ class Wavefunction:
             self._amp[:, :, :, i] = self._backend.evaluate(
                 self.initial[i],
                 local_dict={**self.default_var_dict, **self.variables},
+                global_dict={"t": self.t},
             )
 
         self.normalize_const = normalize_const
@@ -149,7 +149,7 @@ class Wavefunction:
         ),
     ) -> None:
         """Construct FFT bindings through backend plan interface."""
-        axes = tuple(i for i in range(self.num_ext_dim))
+        axes = tuple(i for i, active in enumerate(self.axes) if active)
         self._backend.set_num_threads(num_threads)
         self._fft_plan = self._backend.create_fft_plan(
             self._amp,
