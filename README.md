@@ -47,6 +47,17 @@ psi.propagate(
 For migration details from the pre-v2 API, see `docs/source/v2_migration.rst`.
 CuPy support is optional and requires an NVIDIA CUDA environment.
 
+### Backend accuracy and performance checks
+
+- Accuracy parity (NumPy vs CuPy) is covered by `tests/cupy_backend_test.py`.
+- Local benchmark utility:
+
+```bash
+python benchmarks/backend_benchmark.py --size 192 --steps 25 --repeats 3
+```
+
+This prints NumPy/CuPy timings, estimated speedup, and basic parity metrics.
+
 ### Documentation
 Read the [documentation](https://pytalises.readthedocs.io/en/latest/) to learn more about pytalises' capabilities.
 The documentation features many examples, among others

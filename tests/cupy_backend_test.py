@@ -11,6 +11,14 @@ def g1(n=64, a=-2.0, b=2.0):
     return pt.Grid(shape=(n,), extent=((a, b),))
 
 
+def _to_numpy(x):
+    import cupy as cp
+
+    if isinstance(x, cp.ndarray):
+        return cp.asnumpy(x)
+    return np.asarray(x)
+
+
 def test_cupy_free_propagation_conserves_norm():
     psi = pt.Wavefunction(
         ["exp(-x**2)"],
@@ -56,3 +64,49 @@ def test_cupy_nondiagonal_potential():
         options=pt.PropagationOptions(backend="cupy"),
     )
     np.testing.assert_allclose(np.sum(psi.state_occupation()), 1.0, atol=1e-5)
+
+
+def test_cupy_matches_numpy_reference_dynamics():
+    grid = g1(96, -4, 4)
+    initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]
+    potential = pt.HermitianPotential.from_lower_triangular(
+        [
+            "0.2*x**2 + 0.1*t",
+            "0.03*cos(x) + 0.02*sin(t)",
+            "0.1*x**2 - 0.05*t",
+        ]
+    )
+
+    psi_np = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="numpy")
+    psi_cp = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="cupy")
+
+    steps = 10
+    dt = 0.005
+    psi_np.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(backend="numpy"),
+    )
+    psi_cp.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(backend="cupy"),
+    )
+
+    amp_np = _to_numpy(psi_np.amp)
+    amp_cp = _to_numpy(psi_cp.amp)
+
+    np.testing.assert_allclose(
+        np.abs(amp_cp) ** 2,
+        np.abs(amp_np) ** 2,
+        rtol=5e-5,
+        atol=5e-7,
+    )
+    np.testing.assert_allclose(
+        _to_numpy(psi_cp.state_occupation()),
+        _to_numpy(psi_np.state_occupation()),
+        rtol=5e-5,
+        atol=5e-7,
+    )
