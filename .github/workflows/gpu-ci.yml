@@ -2,30 +2,40 @@ name: GPU CI (RunPod on-demand)
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "pytalises/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - ".github/workflows/gpu-ci.yml"
-  pull_request:
-    paths:
-      - "pytalises/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - ".github/workflows/gpu-ci.yml"
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA). Empty = current ref."
+        required: false
+        default: ""
+      run_benchmarks:
+        description: "Run backend benchmark suite"
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
-  group: gpu-ci-${{ github.ref }}
+  group: gpu-ci-${{ inputs.ref != '' && inputs.ref || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+  reject-unauthorized:
+    if: ${{ github.actor != 'savowe' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block unauthorized trigger
+        run: |
+          echo "::error::This workflow may only be started by @savowe."
+          exit 1
+
   cupy-tests-runpod:
     name: CuPy backend tests (RunPod)
-    # Never run external fork PR code on paid GPU infrastructure.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.actor == 'savowe' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    environment: gpu-ci
 
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -37,16 +47,19 @@ jobs:
       RUNPOD_MIN_MEMORY_GB: ${{ vars.RUNPOD_MIN_MEMORY_GB != '' && vars.RUNPOD_MIN_MEMORY_GB || '15' }}
       RUNPOD_VOLUME_GB: ${{ vars.RUNPOD_VOLUME_GB != '' && vars.RUNPOD_VOLUME_GB || '30' }}
       RUNPOD_CONTAINER_DISK_GB: ${{ vars.RUNPOD_CONTAINER_DISK_GB != '' && vars.RUNPOD_CONTAINER_DISK_GB || '30' }}
+      RUN_BENCHMARKS: ${{ inputs.run_benchmarks && 'true' || 'false' }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
 
       - name: Validate required secrets
         run: |
           set -euo pipefail
-          test -n "${RUNPOD_API_KEY}" || { echo "Missing secret RUNPOD_API_KEY"; exit 1; }
-          test -n "${{ secrets.RUNPOD_SSH_PRIVATE_KEY }}" || { echo "Missing secret RUNPOD_SSH_PRIVATE_KEY"; exit 1; }
+          test -n "${RUNPOD_API_KEY}" || { echo "Missing secret RUNPOD_API_KEY (set it in environment 'gpu-ci')."; exit 1; }
+          test -n "${{ secrets.RUNPOD_SSH_PRIVATE_KEY }}" || { echo "Missing secret RUNPOD_SSH_PRIVATE_KEY (set it in environment 'gpu-ci')."; exit 1; }
 
       - name: Install workflow dependencies
         run: |
@@ -191,7 +204,7 @@ jobs:
             root@"$SSH_HOST":/workspace/pytalises-src.tgz
 
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -i ~/.ssh/id_runpod -p "$SSH_PORT" root@"$SSH_HOST" <<'REMOTE'
+            -i ~/.ssh/id_runpod -p "$SSH_PORT" root@"$SSH_HOST" <<REMOTE
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
 
@@ -207,7 +220,77 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install -e ".[gpu]" pytest
           pytest tests/backend_test.py tests/cupy_backend_test.py -q
+
+          if [ "${RUN_BENCHMARKS}" = "true" ]; then
+            python3 benchmarks/backend_benchmark.py \
+              --size 192 \
+              --steps 25 \
+              --repeats 3 \
+              --warmup 1 \
+              --json-out /workspace/backend-benchmark.json
+          fi
           REMOTE
+
+      - name: Fetch benchmark artifact from pod
+        if: ${{ inputs.run_benchmarks }}
+        env:
+          SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
+          SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
+        run: |
+          set -euo pipefail
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_runpod -P "$SSH_PORT" \
+            root@"$SSH_HOST":/workspace/backend-benchmark.json \
+            /tmp/backend-benchmark.json
+
+      - name: Add benchmark summary
+        if: ${{ inputs.run_benchmarks }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path('/tmp/backend-benchmark.json')
+          data = json.loads(path.read_text())
+
+          lines = [
+              '## Backend benchmark summary',
+              '',
+              '| Backend | Mean (s) | Std (s) |',
+              '|---|---:|---:|',
+          ]
+
+          for row in data.get('results', []):
+              lines.append(
+                  f"| {row['backend']} | {row['mean_seconds']:.4f} | {row['std_seconds']:.4f} |"
+              )
+
+          speedup = data.get('speedup_numpy_over_cupy')
+          if speedup is not None:
+              lines.append('')
+              lines.append(f"**Speedup (NumPy/CuPy):** {speedup:.2f}x")
+
+          parity = data.get('parity')
+          if isinstance(parity, dict):
+              lines.append('')
+              lines.append(
+                  '**Parity max abs diff:** '
+                  f"density={parity['max_density_abs_diff']:.3e}, "
+                  f"occupation={parity['max_occupation_abs_diff']:.3e}"
+              )
+
+          summary_path = Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with open(summary_path, 'a', encoding='utf-8') as fh:
+              fh.write('\n'.join(lines) + '\n')
+          PY
+
+      - name: Upload benchmark artifact
+        if: ${{ inputs.run_benchmarks }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-benchmark-${{ github.run_id }}
+          path: /tmp/backend-benchmark.json
 
       - name: Terminate RunPod pod
         if: ${{ always() && steps.create-pod.outputs.pod_id != '' }}
