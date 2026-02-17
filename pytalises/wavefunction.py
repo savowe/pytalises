@@ -6,162 +6,95 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-import pyfftw
-import numexpr as ne
+
 import pytalises.propagator
+from pytalises.backends import get_backend
+from pytalises.backends.base import Backend
+from pytalises.grid import Grid
+from pytalises.options import PropagationOptions
+from pytalises.potentials import BasePotential
 
 
 class Wavefunction:
-    """
-    Class describing wave function.
+    """Wavefunction state for split-step propagation.
 
     Parameters
     ----------
-    psi : string list of strings
-        Each string describes the initial amplitude in r-space of
-        the wave function. The number of elements is the number
-        of internal degrees of freedom.
-        Additional variables that are used in psi can
-        be defined in the optional parameter variables.
-        Predefined variables are the spatial coordinates x,y,z
-        and time t.
-    number_of_grid_points : tuple of ints
-        Tuple that defines the number of grid points (nX,nY,nZ)
-        of the wave function
-    spatial_ext : list of tuples
-        The supplied values define the boundary positions of the grid
-        and thus define the actual coordinate system.
-    t0: float, optional
-        Internal time of wave function. Default is 0.0.
-    m : float, optional
-        Mass of particle described by the wavefunction.
-        Default is 1.054571817e-34 (numerically equal to hbar).
-    variables : dict
-        Dictionary of additionally used variables in the definition of
-        the wave function in psi.
-        Predefined variables are the spatial coordinates x,y,z
-        and time t.
-    normalize_const : float, optional
-        Normalizes the wave function such that the integral of |Psi|^2
-        over all internal and external degrees of freedom equals
-        `normalize_const`
-
-    Attributes
-    ----------
-    num_int_dim : int
-        The number of internal degrees of freedom
-    num_ex_dim : int
-        The number of external degrees of freedom
-    r : list of 1d arrays
-        The arrays are the evenly spaced spatial coordinates as defined
-        through definition of spatial_ext and number_of_grid_points
-    k : list of 1d arrays
-        The arrays are the evenly spaced inverse spatial coordinates as defined
-        through definition of spatial_ext and number_of_grid_points
-
-    Examples
-    --------
-    Wavefunction with two internal states
-    where the first state is gaussian
-    distributed in 1d r-space and the second
-    state is not occupied at all.
-
-    >>> from pytalises import Wavefunction
-    >>> psi = Wavefunction(["exp(-((x-x0)/a0)**2)", "0.0"],
-        (16,), [(-2,2),], variables={'a0':1/2, 'x0':0})
-    >>> print(psi.num_int_dim)
-    2
-    >>> print(psi.num_ext_dim)
-    1
-    >>> print(psi.amp)
-    [[1.12535175e-07+0.j 0.00000000e+00+0.j]
-    [6.03594712e-06+0.j 0.00000000e+00+0.j]
-    [1.83289361e-04+0.j 0.00000000e+00+0.j]
-    [3.15111160e-03+0.j 0.00000000e+00+0.j]
-    [3.06707930e-02+0.j 0.00000000e+00+0.j]
-    [1.69013315e-01+0.j 0.00000000e+00+0.j]
-    [5.27292424e-01+0.j 0.00000000e+00+0.j]
-    [9.31358402e-01+0.j 0.00000000e+00+0.j]
-    [9.31358402e-01+0.j 0.00000000e+00+0.j]
-    [5.27292424e-01+0.j 0.00000000e+00+0.j]
-    [1.69013315e-01+0.j 0.00000000e+00+0.j]
-    [3.06707930e-02+0.j 0.00000000e+00+0.j]
-    [3.15111160e-03+0.j 0.00000000e+00+0.j]
-    [1.83289361e-04+0.j 0.00000000e+00+0.j]
-    [6.03594712e-06+0.j 0.00000000e+00+0.j]
-    [1.12535175e-07+0.j 0.00000000e+00+0.j]]
-    >>> print(psi.r)
-    [array([-2.        , -1.73333333, -1.46666667, -1.2       , -0.93333333,
-       -0.66666667, -0.4       , -0.13333333,  0.13333333,  0.4       ,
-        0.66666667,  0.93333333,  1.2       ,  1.46666667,  1.73333333,
-        2.        ]), array([0.]), array([0.])]
+    initial
+        Initial amplitude expression(s). One string per internal state.
+    grid
+        Explicit spatial grid definition.
+    t0
+        Initial time.
+    m
+        Particle mass.
+    variables
+        Additional variables used in expressions.
+    normalize_const
+        If provided, normalize total population to this value.
+    backend
+        Backend name (``"auto"``, ``"numpy"``) or backend instance.
+    num_threads
+        Thread count for backend routines.
     """
 
     def __init__(
         self,
-        psi: str | list[str],
-        number_of_grid_points: tuple[int, ...] | int,
-        spatial_ext: list[tuple[float, float]] | tuple[float, float],
+        initial: str | list[str],
+        grid: Grid,
         t0: float = 0.0,
         m: float = 1.054571817e-34,
         variables: dict[str, Any] | None = None,
         normalize_const: float | None = None,
+        backend: str | Backend | None = "auto",
+        num_threads: int = 1,
     ) -> None:
-        """Initialize Wavefunction."""
         if variables is None:
             variables = {}
-        # It follows a series of checks if arguments are valid
-        assert_type_or_list_of_type(psi, str)
-        if type(psi) is not list and type(psi) is str:
-            psi = [psi]
-        if type(number_of_grid_points) is int:
-            number_of_grid_points = (number_of_grid_points,)
-        assert_type_or_list_of_type(number_of_grid_points, tuple)
-        if type(spatial_ext) is not list and type(spatial_ext) is tuple:
-            spatial_ext = [spatial_ext]
-        assert_type_or_list_of_type(spatial_ext, tuple)
-        assert type(t0) is float, "t0 is no float"
-        assert type(m) is float, "m is no float"
-        assert type(variables) is dict, "variables is no dict"
-        # Argument check passed.
-        # It follows generation of internal variables
-        # number of internal dims is number of provided strings to psi arg
-        self.num_int_dim = len(psi)
-        # number of external dims is number of ints in
-        # number_of_grid_points that is > 1
-        for _ in range(3 - len(number_of_grid_points)):
-            number_of_grid_points += (1,)
-        self.num_ext_dim = sum([1 for n in number_of_grid_points if n > 1])
-        self.nX, self.nY, self.nZ = number_of_grid_points
-        self.number_of_grid_points = number_of_grid_points
-        self.spatial_ext = spatial_ext
-        for _ in range(3 - len(self.spatial_ext)):
-            self.spatial_ext += ((0, 0),)
-        self.axes = tuple(np.where(np.array(number_of_grid_points) > 1, 1, 0))
-        # Generation of variables that describe the domain
-        # of the wave functionin position and momentum space
-        r = []
-        Delta_r = []
-        k = []
-        delta_k = []
-        for i, spatial_ext_tuple in enumerate(spatial_ext):
+        if isinstance(initial, str):
+            initial = [initial]
+        if not isinstance(grid, Grid):
+            raise TypeError("grid must be an instance of pytalises.Grid")
+        if not isinstance(t0, float):
+            raise TypeError("t0 must be float")
+        if not isinstance(m, float):
+            raise TypeError("m must be float")
+        if not isinstance(variables, dict):
+            raise TypeError("variables must be dict")
+
+        self._backend = get_backend(backend, num_threads=num_threads)
+
+        self.grid = grid
+        self.initial = list(initial)
+        self.num_int_dim = len(self.initial)
+
+        self.number_of_grid_points = self.grid.padded_shape
+        self.spatial_ext = list(self.grid.padded_extent)
+
+        self.axes = tuple(1 if n > 1 else 0 for n in self.number_of_grid_points)
+        self.num_ext_dim = int(sum(self.axes))
+        self.nX, self.nY, self.nZ = self.number_of_grid_points
+
+        r: list[NDArray[np.floating[Any]]] = []
+        Delta_r: list[float] = []
+        k: list[NDArray[np.floating[Any]] | float] = []
+        delta_k: list[float] = []
+
+        for i, spatial_ext_tuple in enumerate(self.spatial_ext):
             r_min = spatial_ext_tuple[0]
             r_max = spatial_ext_tuple[1]
-            r.append(np.linspace(r_min, r_max, num=number_of_grid_points[i]))
+            n = self.number_of_grid_points[i]
+            r_axis = self._backend.linspace(r_min, r_max, num=n)
+            r.append(r_axis)
             if self.axes[i] == 0:
                 Delta_r.append(np.nan)
                 delta_k.append(np.nan)
                 k.append(0.0)
             else:
-                Delta_r.append(r_max - r_min)
-                delta_k.append(2 * np.pi / (r_max - r_min))
-                k.append(
-                    np.fft.fftfreq(number_of_grid_points[i])
-                    * 2
-                    * np.pi
-                    * number_of_grid_points[i]
-                    / Delta_r[i]
-                )
+                drange = r_max - r_min
+                Delta_r.append(drange)
+                delta_k.append(2 * np.pi / drange)
+                k.append(self._backend.fftfreq(n) * 2 * np.pi * n / drange)
 
         self._r = r
         self.Delta_r = Delta_r
@@ -171,267 +104,192 @@ class Wavefunction:
         ]
         self.delta_k = delta_k
         self._k = k
-        self.rmesh = np.meshgrid(*r, indexing="ij")
-        self.kmesh = np.meshgrid(*k, indexing="ij")
-        self._amp = pyfftw.empty_aligned(
-            number_of_grid_points + (self.num_int_dim,), dtype="complex128", order="C"
+
+        self.rmesh = self._backend.meshgrid(*r, indexing="ij")
+        self.kmesh = self._backend.meshgrid(*k, indexing="ij")
+
+        self._amp = self._backend.empty_aligned(
+            self.number_of_grid_points + (self.num_int_dim,),
+            dtype="complex128",
         )
-        self.psi = psi
+
         self.t = t0
         self.m = m
-        # alpha is the diffusion factor in the kinetic operator
         self.alpha = 1.054571817e-34 / (2 * self.m)
+
         self.default_var_dict = {
             "alpha": self.alpha,
             "x": self.rmesh[0],
             "y": self.rmesh[1],
             "z": self.rmesh[2],
         }
-        # Define the variables that are used in the evaluation of the potentials
-        # during time propagation using the numexpr library
         for i in range(self.num_int_dim):
-            self.default_var_dict["psi" + str(i)] = self._amp[:, :, :, i]
+            self.default_var_dict[f"psi{i}"] = self._amp[:, :, :, i]
+
         self.variables = variables
         for i in range(self.num_int_dim):
-            self._amp[:, :, :, i] = ne.evaluate(
-                self.psi[i],
+            self._amp[:, :, :, i] = self._backend.evaluate(
+                self.initial[i],
                 local_dict={**self.default_var_dict, **self.variables},
-                order="C",
+                global_dict={"t": self.t},
             )
+
         self.normalize_const = normalize_const
         if normalize_const is not None:
             self.normalize_to(normalize_const)
-        self.construct_FFT()
+
+        self.construct_FFT(num_threads=num_threads)
 
     def construct_FFT(
         self,
-        num_of_threads: int = 1,
+        num_threads: int = 1,
         FFTWflags: tuple[str, ...] = (
             "FFTW_ESTIMATE",
             "FFTW_DESTROY_INPUT",
         ),
     ) -> None:
-        """Construct pyfftw bindings."""
-        axes = tuple(i for i in range(self.num_ext_dim))
-        pyfftw.config.NUM_THREADS = num_of_threads
-        self.fft = pyfftw.FFTW(
-            self._amp,
-            self._amp,
-            axes=axes,
-            direction="FFTW_FORWARD",
-            threads=num_of_threads,
-            flags=FFTWflags,
-        )
-        self.ifft = pyfftw.FFTW(
-            self._amp,
+        """Construct FFT bindings through backend plan interface."""
+        axes = tuple(i for i, active in enumerate(self.axes) if active)
+        self._backend.set_num_threads(num_threads)
+        self._fft_plan = self._backend.create_fft_plan(
             self._amp,
             axes=axes,
-            direction="FFTW_BACKWARD",
-            threads=num_of_threads,
+            num_threads=num_threads,
             flags=FFTWflags,
         )
+        self.fft = self._fft_plan.forward
+        self.ifft = self._fft_plan.backward
+
+    def _active_axis_indices(self) -> list[int]:
+        return [i for i, active in enumerate(self.axes) if active]
+
+    def _volume_element(self) -> float:
+        elements = [self.delta_r[i] for i, active in enumerate(self.axes) if active]
+        if not elements:
+            return 1.0
+        return float(np.prod(elements))
 
     @property
-    def r(self) -> NDArray[np.floating[Any]] | list[NDArray[np.floating[Any]]]:
-        """(list of) array of the wave function position axes."""
-        if self.num_ext_dim == 1:
-            return self._r[self.axes.index(1)]
-        else:
-            return self._r
+    def r(self) -> tuple[NDArray[np.floating[Any]], ...]:
+        """Spatial coordinate arrays per active axis."""
+        return tuple(self._r[i] for i in self._active_axis_indices())
 
     @property
-    def k(self) -> NDArray[np.floating[Any]] | list[NDArray[np.floating[Any]]]:
-        """(list of) array of the wave function momentum axes."""
-        if self.num_ext_dim == 1:
-            return self._k[self.axes.index(1)]
-        else:
-            return self._k
+    def k(self) -> tuple[NDArray[np.floating[Any]], ...]:
+        """Reciprocal coordinate arrays per active axis."""
+        return tuple(self._k[i] for i in self._active_axis_indices())
 
     @property
     def amp(self) -> NDArray[np.complexfloating[Any, Any]]:
-        """Ndarray of the wave function amplitudes."""
-        return np.squeeze(self._amp)
+        """Wavefunction amplitudes in canonical public shape.
+
+        Shape is ``grid.shape + (num_internal_states,)``.
+        """
+        ext_dims = self.grid.ndim
+        index = (
+            (slice(None),) * ext_dims + (0,) * (3 - ext_dims) + (slice(None),)
+        )
+        return self._amp[index]
 
     def exp_pos(self, axis: int | None = None) -> NDArray[np.floating[Any]]:
-        """
-        Calculate the expected position on given axis.
-
-        Calculates the mean position of Psi on chosen axis.
-        Axes 0,1,2 correspond to x,y,z. The other two axes
-        are traced out. If no axis is given returns array
-        of mean position of all external degrees of freedom.
-        """
+        """Calculate expected position for one axis or all external axes."""
+        active_axes = self._active_axis_indices()
         if axis is None:
-            exp_pos = np.empty((self.num_ext_dim))
+            exp_pos = np.empty((self.num_ext_dim,))
             for i in range(self.num_ext_dim):
                 exp_pos[i] = self.exp_pos(i)
-        else:
-            axes_to_trace = [0, 1, 2]
-            axis = axes_to_trace.pop(axis)
-            psi_sq_amp = np.power(np.abs(self._amp), 2)
-            traced_out_psi = np.sum(psi_sq_amp, axis=tuple(axes_to_trace))
-            exp_pos = np.einsum("ri,r->", traced_out_psi, self._r[axis])
-            exp_pos *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
+            return exp_pos
+
+        if not (0 <= axis < self.num_ext_dim):
+            raise ValueError(f"axis must be in [0, {self.num_ext_dim - 1}]")
+
+        phys_axis = active_axes[axis]
+        axes_to_trace = [0, 1, 2]
+        axes_to_trace.pop(phys_axis)
+        psi_sq_amp = self._backend.power(self._backend.abs(self._amp), 2)
+        traced_out_psi = self._backend.sum(psi_sq_amp, axis=tuple(axes_to_trace))
+        exp_pos = self._backend.einsum("ri,r->", traced_out_psi, self._r[phys_axis])
+        exp_pos *= self._volume_element()
         return exp_pos
 
     def var_pos(self, axis: int | None = None) -> NDArray[np.floating[Any]]:
-        """
-        Calculate the variance on given axis.
-
-        Calculates the variance in position of Psi on chosen axis.
-        Axes 0,1,2 correspond to x,y,z. The other two axes
-        are traced out. If no axis is given returns array
-        of variance position of all external degrees of freedom.
-        """
+        """Calculate position variance for one axis or all external axes."""
+        active_axes = self._active_axis_indices()
         if axis is None:
-            var_pos = np.empty((self.num_ext_dim))
+            var_pos = np.empty((self.num_ext_dim,))
             for i in range(self.num_ext_dim):
                 var_pos[i] = self.var_pos(i)
-        else:
-            axes_to_trace = [0, 1, 2]
-            i = axis
-            axis = axes_to_trace.pop(axis)
-            psi_sq_amp = np.power(np.abs(self._amp), 2)
-            traced_out_psi = np.sum(psi_sq_amp, axis=tuple(axes_to_trace))
-            var_pos = np.einsum(
-                "ri,r->", traced_out_psi, (self._r[axis] - self.exp_pos(i)) ** 2
-            )
-            var_pos *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
+            return var_pos
+
+        if not (0 <= axis < self.num_ext_dim):
+            raise ValueError(f"axis must be in [0, {self.num_ext_dim - 1}]")
+
+        phys_axis = active_axes[axis]
+        axes_to_trace = [0, 1, 2]
+        axes_to_trace.pop(phys_axis)
+        psi_sq_amp = self._backend.power(self._backend.abs(self._amp), 2)
+        traced_out_psi = self._backend.sum(psi_sq_amp, axis=tuple(axes_to_trace))
+        var_pos = self._backend.einsum(
+            "ri,r->",
+            traced_out_psi,
+            (self._r[phys_axis] - self.exp_pos(axis)) ** 2,
+        )
+        var_pos *= self._volume_element()
         return var_pos
 
     def normalize_to(self, n_const: float) -> None:
-        """
-        Normalize the wave function.
-
-        Normalizes the wave function such that the integral
-        of |Psi|^2 over all internal and external states
-        equals n_const
-        """
-        # Calculate |Psi|^2 over all internal and external states
-        s = np.einsum("xyzi,xyzi->", self._amp, np.conjugate(self._amp))
-        # Mulitply with product of infinitesimal volumes dx*dy*dz
-        # while ignoring nonextisten dimensions
-        s *= np.prod(self.delta_r, where=np.where(self.axes, True, False))
-        self._amp *= np.sqrt(n_const / s)
+        """Normalize total wavefunction occupation to ``n_const``."""
+        s = self._backend.einsum("xyzi,xyzi->", self._amp, self._backend.conjugate(self._amp))
+        s *= self._volume_element()
+        self._amp *= self._backend.sqrt(n_const / s)
 
     def state_occupation(
         self, nth_state: int | None = None
     ) -> NDArray[np.floating[Any]]:
-        """
-        Return occupation number of nth internal state.
-
-        Evaluates the spatial integral over |Psi|^2 for
-        the nth internal state. If none is given a vector
-        of the occupation number of all internal states
-        is returned.
-        """
+        """Return occupation number of one internal state or all states."""
         if nth_state is None:
-            state_occupation = np.empty((self.num_int_dim,))
+            occ = np.empty((self.num_int_dim,))
             for i in range(self.num_int_dim):
-                state_occupation[i] = self.state_occupation(i)
-        else:
-            state_occupation = np.sum(
-                np.abs(self._amp[:, :, :, nth_state]) ** 2
-            ) * np.prod(self.delta_r, where=np.where(self.axes, True, False))
-        return state_occupation
+                occ[i] = self.state_occupation(i)
+            return occ
+
+        if not (0 <= nth_state < self.num_int_dim):
+            raise ValueError(f"nth_state must be in [0, {self.num_int_dim - 1}]")
+
+        return (
+            self._backend.sum(self._backend.abs(self._amp[:, :, :, nth_state]) ** 2)
+            * self._volume_element()
+        )
 
     def freely_propagate(
         self,
-        num_time_steps: int,
-        delta_t: float,
-        num_of_threads: int = 1,
-        FFTWflags: tuple[str, ...] = (
-            "FFTW_ESTIMATE",
-            "FFTW_DESTROY_INPUT",
-        ),
+        steps: int,
+        dt: float,
+        options: PropagationOptions | None = None,
     ) -> None:
-        """
-        Propagates the Wavefunction object in time with V=0.
-
-        Function that can propagate the wavefunction if no potential
-        is present.
-
-        Parameters
-        ----------
-        num_time_steps : int
-            Number of times the wavefunction is propagated by time delta_t
-            using the Split-Step Fourier method.
-        delta_t : float
-            Time increment the wavefunction is propagated in one time step.
-        num_of_threads : int, optional
-            Number of threads uses for calculation. Default is 1.
-        FFTWflags : tuple of strings
-            Options for FFTW planning [1]. Default is
-            ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
-
-        References
-        ----------
-        [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
-        """
+        """Propagate the wavefunction in time with ``V = 0``."""
         pytalises.propagator.freely_propagate(
-            self, num_time_steps, delta_t, num_of_threads, FFTWflags
+            self,
+            steps,
+            dt,
+            options=options,
         )
 
     def propagate(
         self,
-        potential: str | list[str],
-        num_time_steps: int,
-        delta_t: float,
-        **kwargs: Any,
+        potential: BasePotential,
+        steps: int,
+        dt: float,
+        *,
+        variables: dict[str, Any] | None = None,
+        options: PropagationOptions | None = None,
     ) -> None:
-        """
-        Propagates the Wavefunction object in time.
-
-        Function that propagates the wavefunction using a
-        Split-Step Fourier method [1].
-
-        Parameters
-        ----------
-        potential : string list of strings
-            This list contains the matrix elements of the potential term V
-            in string format. If the potential has nondiagonal elements
-            (see optional parameter diag) each elements represents
-            one matrix element of the lower triangular part of V.
-            For example a 3x3 potential with nondiagonal elements would be
-            of form potential=[H00, H10, H20, H11, H21, H22].
-            If the potential term is supposed to have only diagonal elements
-            (diag=True), the potential parameter for a 3x3 potential would
-            look like potential=[H00,H11,H22].
-        num_time_steps : int
-            Number of times the wavefunction is propagated by time delta_t
-            using the Split-Step Fourier method.
-        delta_t : float
-            Time increment the wavefunction is propagated in one time step.
-        variables : dict, optional
-            Dictionary containing values for variables you might have used
-            in potential
-        diag : bool , optional
-            If true, no numerical diagonalization has to be invoked in order
-            to calculate time-propagation as nondiagonal elements are omitted.
-            This makes the computation much faster. Default is False.
-        num_of_threads : int, optional
-            Number of threads uses for calculation. Default behaviour
-            is to use all threads available.
-        FFTWflags : tuple of strings
-            Options for FFTW planning [2]. Default is
-            ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
-
-        References
-        ----------
-        [1] https://en.wikipedia.org/wiki/Split-step_method
-        [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
-        """
+        """Propagate the wavefunction in time with a structured potential."""
         pytalises.propagator.propagate(
-            self, potential, num_time_steps, delta_t, **kwargs
+            self,
+            potential,
+            steps,
+            dt,
+            variables=variables,
+            options=options,
         )
-
-
-def assert_type_or_list_of_type(argument, wished_type):
-    assert (
-        type(argument) is wished_type or type(argument) is list
-    ), "{} is not {} or list of {}.".format(argument, wished_type, wished_type)
-    if type(argument) is list:
-        for argument_element in argument:
-            assert (
-                type(argument_element) is wished_type
-            ), "{} is not {} or list of {}.".format(argument, wished_type, wished_type)

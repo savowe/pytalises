@@ -18,6 +18,34 @@
 - speed of the [FFTW](https://pypi.org/project/pyFFTW/), [BLAS](https://www.netlib.org/blas/) and [numexpr](https://numexpr.readthedocs.io/en/latest/) libraries with multithreading
 - crucial functions are just-in-time compiled with [numba](https://numba.readthedocs.io/en/stable/)
 
+### v2 API Quickstart
+
+```python
+import pytalises as pt
+
+grid = pt.Grid(shape=(256,), extent=((-4, 4),))
+psi = pt.Wavefunction(
+    initial=["exp(-x**2)", "0"],
+    grid=grid,
+)
+
+V = pt.HermitianPotential.from_lower_triangular([
+    "0",
+    "Omega*cos(t)",
+    "Delta",
+])
+
+psi.propagate(
+    potential=V,
+    steps=1000,
+    dt=1e-6,
+    variables={"Omega": 2.0, "Delta": 1.0},
+    options=pt.PropagationOptions(threads=4),
+)
+```
+
+For migration details from the pre-v2 API, see `docs/source/v2_migration.rst`.
+
 ### Documentation
 Read the [documentation](https://pytalises.readthedocs.io/en/latest/) to learn more about pytalises' capabilities.
 The documentation features many examples, among others

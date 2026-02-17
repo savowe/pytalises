@@ -1,13 +1,13 @@
-"""Module containing functions that help propagating the Wavefunction class."""
+"""Module containing functionality for wavefunction propagation."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from numba import jit, prange, set_num_threads
-from numpy.linalg import eigh
 import numexpr as ne
-import numpy as np
+
+from pytalises.options import PropagationOptions
+from pytalises.potentials import BasePotential, zero_potential
 
 if TYPE_CHECKING:
     from pytalises.wavefunction import Wavefunction
@@ -17,320 +17,220 @@ import pytalises.wavefunction
 
 def propagate(
     psi: Wavefunction,
-    potential: str | list[str],
-    num_time_steps: int,
-    delta_t: float,
-    **kwargs: Any,
+    potential: BasePotential,
+    steps: int,
+    dt: float,
+    *,
+    variables: dict[str, Any] | None = None,
+    options: PropagationOptions | None = None,
 ) -> None:
-    """
-    Propagates a Wavefunction object in time.
-
-    Function that propagates the wavefunction using a
-    Split-Step Fourier method [1].
-
-    Parameters
-    ----------
-    psi : Wavefunction
-        The Wavefunction object the Propagator class acts on
-    potential : string list of strings
-        This list contains the matrix elements of the potential term V
-        in string format. If the potential has nondiagonal elements
-        (see optional parameter diag) each elements represents
-        one matrix element of the lower triangular part of V.
-        For example a 3x3 potential with nondiagonal elements would be
-        of form potential=[H00, H10, H20, H11, H21, H22].
-        If the potential term is supposed to have only diagonal elements
-        (diag=True), the potential parameter for a 3x3 potential would
-        look like potential=[H00,H11,H22].
-    num_time_steps : int
-        Number of times the wavefunction is propagated by time delta_t
-        using the Split-Step Fourier method.
-    delta_t : float
-        Time increment the wavefunction is propagated in one time step.
-    variables : dict, optional
-        Dictionary containing values for variables you might have used
-        in potential
-    diag : bool , optional
-        If true, no numerical diagonalization has to be invoked in order
-        to calculate time-propagation as nondiagonal elements are omitted.
-        This makes the computation much faster. Default is False.
-    num_of_threads : int, optional
-        Number of threads uses for calculation. Default behaviour
-        is to use all threads available.
-    FFTWflags : tuple of strings
-        Options for FFTW planning [2]. Default is
-        ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
-
-    References
-    ----------
-    [1] https://en.wikipedia.org/wiki/Split-step_method
-    [2] http://www.fftw.org/fftw3_doc/Planner-Flags.html
-    """
-    U = Propagator(psi, potential, **kwargs)
-    U.kinetic_prop(delta_t / 2)
-    U.potential_prop(delta_t)
-    for _ in range(num_time_steps - 1):
-        U.kinetic_prop(delta_t)
-        U.potential_prop(delta_t)
-    U.kinetic_prop(delta_t / 2)
+    """Propagate a wavefunction in time using Strang splitting."""
+    U = Propagator(
+        psi,
+        potential,
+        variables=variables,
+        options=options,
+    )
+    U.kinetic_prop(dt / 2)
+    U.potential_prop(dt)
+    for _ in range(steps - 1):
+        U.kinetic_prop(dt)
+        U.potential_prop(dt)
+    U.kinetic_prop(dt / 2)
 
 
 def freely_propagate(
     psi: Wavefunction,
-    num_time_steps: int,
-    delta_t: float,
-    num_of_threads: int = 1,
-    FFTWflags: tuple[str, ...] = (
-        "FFTW_ESTIMATE",
-        "FFTW_DESTROY_INPUT",
-    ),
+    steps: int,
+    dt: float,
+    *,
+    options: PropagationOptions | None = None,
 ) -> None:
-    """
-    Propagates a Wavefunction object in time with V=0.
-
-    Function that can propagate the wavefunction if no potential
-    is present.
-
-    Parameters
-    ----------
-    psi : Wavefunction
-        The Wavefunction object the Propagator class acts on
-    num_time_steps : int
-        Number of times the wavefunction is propagated by time delta_t
-        using the Split-Step Fourier method.
-    delta_t : float
-        Time increment the wavefunction is propagated in one time step.
-    num_of_threads : int, optional
-        Number of threads uses for calculation. Default is 1.
-    FFTWflags : tuple of strings
-        Options for FFTW planning [1]. Default is
-        ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
-
-    References
-    ----------
-    [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
-    """
+    """Propagate a wavefunction in time with ``V = 0``."""
     U = Propagator(
         psi,
-        potential=["0"] * psi.num_int_dim,
-        diag=True,
-        num_of_threads=num_of_threads,
-        FFTWflags=FFTWflags,
+        potential=zero_potential(psi.num_int_dim),
+        variables={},
+        options=options,
     )
-    for _ in range(num_time_steps):
-        U.kinetic_prop(delta_t)
+    for _ in range(steps):
+        U.kinetic_prop(dt)
 
 
 class Propagator:
-    """
-    Class for propagating instances of the Wavefunction class.
-
-    Parameters
-    ----------
-    psi : Wavefunction
-        The Wavefunction object the Propagator class acts on
-    potential : list of strings
-        This list contains the matrix elements of the potential term V
-        in string format. If the potential has nondiagonal elements
-        (see optional parameter diag) each elements represents
-        one matrix element of the lower triangular part of V.
-        For example a 3x3 potential with nondiagonal elements would be
-        of form potential=[H00, H10, H20, H11, H21, H22].
-        If the potential term is supposed to have only diagonal elements
-        (diag=True), the potential argument for a 3x3 potential would
-        look like potential=[H00,H11,H22].
-    variables : dict, optional
-        Dictionary containing values for variables you might have used
-        in potential
-    diag : bool , optional
-        If true, no numerical diagonalization has to be invoked in order
-        to calculate time-propagation. Default is False.
-    num_of_threads : int, optional
-        Number of threads uses for calculation. Default is 1.
-    FFTWflags : tuple of strings
-        Options for FFTW planning [1]. Default is
-        ('FFTW_ESTIMATE', 'FFTW_DESTROY_INPUT',).
-
-    References
-    ----------
-    [1] http://www.fftw.org/fftw3_doc/Planner-Flags.html
-    """
+    """Class for propagating instances of :class:`pytalises.Wavefunction`."""
 
     def __init__(
         self,
-        psi,
-        potential,
-        variables={},
-        diag=False,
-        num_of_threads=1,
-        FFTWflags=(
-            "FFTW_ESTIMATE",
-            "FFTW_DESTROY_INPUT",
-        ),
+        psi: Wavefunction,
+        potential: BasePotential,
+        *,
+        variables: dict[str, Any] | None = None,
+        options: PropagationOptions | None = None,
     ):
-        """Initialize the propagator."""
+        """Initialize propagator."""
         self.psi = psi
-        self.v = self.Potential(potential, variables, diag)
+        self.options = options or PropagationOptions()
+
+        if self.options.backend not in ("auto", self.psi._backend.name):
+            raise ValueError(
+                "PropagationOptions.backend must match Wavefunction backend. "
+                f"Got options.backend='{self.options.backend}', "
+                f"wavefunction backend='{self.psi._backend.name}'."
+            )
+
+        self._backend = self.psi._backend
+        self._backend.set_num_threads(self.options.threads)
+
+        self.v = self.Potential.from_potential(
+            potential=potential,
+            variables=variables or {},
+            num_int_dim=psi.num_int_dim,
+        )
+
         assert isinstance(psi, pytalises.wavefunction.Wavefunction)
         assert self.v.num_int_dim == self.psi.num_int_dim
         assert self.psi._amp.shape[-1] == self.psi.num_int_dim
-        self.V_eval_array = np.zeros(
+
+        self.V_eval_array = self._backend.zeros(
             psi.number_of_grid_points + (psi.num_int_dim, psi.num_int_dim),
-            order="C",
             dtype="complex128",
         )
-        self.V_eval_eigval_array = np.zeros(
+        self.V_eval_eigval_array = self._backend.zeros(
             psi.number_of_grid_points + (psi.num_int_dim,),
-            order="C",
             dtype="complex128",
         )
-        self.num_of_threads = num_of_threads
-        set_num_threads(num_of_threads)
-        ne.set_num_threads(num_of_threads)
-        self.psi.construct_FFT(num_of_threads, FFTWflags)
-        # Chose method for calculating time propgation
-        # If potential is nondiagonal, additional
-        # numeric diangonalization will be performed
+
+        self.psi.construct_FFT(self.options.threads, self.options.fftw_flags)
+
         if self.v.diag is True:
             self.prop_method = self.diag_potential_prop
         else:
             self.prop_method = self.nondiag_potential_prop
-        # Check if potential is static and if that is the case
-        # precompute the potential grid V(x,y,z) to use it
-        # for all following calculations
+
         if self.v.static is True:
             if self.v.diag is True:
                 self.eval_diag_V()
-            if self.v.diag is False:
+            else:
                 self.eval_V()
-                get_eig(self.V_eval_array, self.V_eval_eigval_array)
+                self.V_eval_eigval_array, self.V_eval_array = self._backend.eigh(
+                    self.V_eval_array
+                )
 
-    def potential_prop(self, delta_t):
-        """
-        Wrap function that calculates exp(i*V(x,y,z)/hbar*delta_t)*Psi(x,y,z).
+    def potential_prop(self, dt: float) -> None:
+        """Apply potential propagator step."""
+        self.prop_method(dt)
 
-        This can be either nondiag_potential_prop or diag_potential_prop.
-        """
-        self.prop_method(delta_t)
-
-    def nondiag_potential_prop(self, delta_t):
-        """
-        Calculate exp(i*V/hbar*delta_t)*Psi using numerical diagonalization.
-
-        This method has to be used if the potential matrix has nondiagonal
-        elements.
-        """
+    def nondiag_potential_prop(self, dt: float) -> None:
+        """Apply potential step for non-diagonal potentials."""
         if self.v.static is False:
             self.eval_V()
-            get_eig(self.V_eval_array, self.V_eval_eigval_array)
-        np.einsum(
+            self.V_eval_eigval_array, self.V_eval_array = self._backend.eigh(
+                self.V_eval_array
+            )
+        self._backend.einsum(
             "xyzij,xyzj,xyzkj,xyzk->xyzi",
             self.V_eval_array,
-            ne.evaluate(
-                "exp(-1j*eigval*delta_t)",
-                local_dict={"eigval": self.V_eval_eigval_array, "delta_t": delta_t},
+            self._backend.evaluate(
+                "exp(-1j*eigval*dt)",
+                local_dict={"eigval": self.V_eval_eigval_array, "dt": dt},
             ),
-            np.conjugate(self.V_eval_array),
+            self._backend.conjugate(self.V_eval_array),
             self.psi._amp,
             out=self.psi._amp,
-            optimize="optimal",
-            order="C",
         )
 
-    def diag_potential_prop(self, delta_t):
-        """
-        Calculate exp(i*V/hbar*delta_t)*Psi by simple matrix multiplication.
-
-        This method is used if the potential matrix V is diagonal. This is
-        much faster than `nondiag_potential_prop` and should be used if
-        possible.
-        """
+    def diag_potential_prop(self, dt: float) -> None:
+        """Apply potential step for diagonal potentials."""
         if self.v.static is False:
             self.eval_diag_V()
-        np.einsum(
+        self._backend.einsum(
             "xyzii,xyzi->xyzi",
-            ne.evaluate(
-                "exp(-1j*V*delta_t)",
-                local_dict={"V": self.V_eval_array, "delta_t": delta_t},
+            self._backend.evaluate(
+                "exp(-1j*V*dt)",
+                local_dict={"V": self.V_eval_array, "dt": dt},
             ),
             self.psi._amp,
             out=self.psi._amp,
-            optimize="optimal",
-            order="C",
         )
 
-    def kinetic_prop(self, delta_t):
-        """
-        Perform time propagation in k-space.
-
-        Transforms the Wavefunction into k-space,
-        calculates exp(i*hbar/(2m)*k**2*delta_t)*Psi(kx,ky,kz)
-        and transforms it back into r-space.
-        """
+    def kinetic_prop(self, dt: float) -> None:
+        """Perform kinetic propagation step in reciprocal space."""
         self.psi.fft()
-        np.einsum(
+        self._backend.einsum(
             "xyz,xyzi->xyzi",
-            ne.evaluate(
-                "exp(-1j*alpha*delta_t*(kx**2+ky**2+kz**2))",
+            self._backend.evaluate(
+                "exp(-1j*alpha*dt*(kx**2+ky**2+kz**2))",
                 local_dict={
                     "kx": self.psi.kmesh[0],
                     "ky": self.psi.kmesh[1],
                     "kz": self.psi.kmesh[2],
                     "alpha": self.psi.alpha,
-                    "delta_t": delta_t,
+                    "dt": dt,
                 },
-                order="C",
             ),
             self.psi._amp,
             out=self.psi._amp,
-            optimize="optimal",
         )
         self.psi.ifft()
-        self.psi.t += delta_t
+        self.psi.t += dt
 
-    def eval_V(self):
-        """
-        Evalutes V on the whole spatial grid.
-
-        The result is saved in Propagator.V_eval_array.
-        """
+    def eval_V(self) -> None:
+        """Evaluate full potential matrix on the complete spatial grid."""
         k = 0
         for i in range(self.psi.num_int_dim):
             for j in range(i, self.psi.num_int_dim):
-                self.V_eval_array[:, :, :, j, i] = ne.evaluate(
+                self.V_eval_array[:, :, :, j, i] = self._backend.evaluate(
                     self.v.potential_strings[k],
                     local_dict={**self.v.variables, **self.psi.default_var_dict},
                     global_dict={"t": self.psi.t},
-                    order="C",
                 )
                 k += 1
 
-    def eval_diag_V(self):
-        """
-        Evalutes diagonal elements of V on the whole spatial grid.
-
-        The result is saved in Propagator.V_eval_array.
-        """
+    def eval_diag_V(self) -> None:
+        """Evaluate diagonal potential matrix elements."""
         for i in range(self.psi.num_int_dim):
-            self.V_eval_array[:, :, :, i, i] = ne.evaluate(
+            self.V_eval_array[:, :, :, i, i] = self._backend.evaluate(
                 self.v.potential_strings[i],
                 local_dict={**self.v.variables, **self.psi.default_var_dict},
                 global_dict={"t": self.psi.t},
-                order="C",
             )
 
     class Potential:
-        """Simple class for collecting information about the potential."""
+        """Simple container for potential metadata."""
 
-        def __init__(self, potential_string, variables={}, diag=False):
-            """Initialize Potential."""
-            if type(potential_string) is not list and type(potential_string) is str:
-                self.potential_strings = [potential_string]
-            else:
-                self.potential_strings = potential_string
+        @classmethod
+        def from_potential(
+            cls,
+            potential: BasePotential,
+            variables: dict[str, Any],
+            num_int_dim: int,
+        ) -> "Propagator.Potential":
+            if not isinstance(potential, BasePotential):
+                raise TypeError(
+                    "potential must be a structured potential object "
+                    "(e.g. DiagonalPotential or HermitianPotential)."
+                )
+            spec = potential.to_spec(num_states=num_int_dim)
+            return cls(
+                potential_string=list(spec.expressions),
+                variables=variables,
+                diag=spec.diag,
+            )
+
+        def __init__(
+            self,
+            potential_string: list[str],
+            variables: dict[str, Any] | None = None,
+            diag: bool = False,
+        ) -> None:
+            if variables is None:
+                variables = {}
+
+            self.potential_strings = potential_string
             self.num_v = len(self.potential_strings)
             self.variables = variables
-            # Check if potential is static in time
+
             for pot_string in self.potential_strings:
                 potential_nex = ne.NumExpr(pot_string)
                 try:
@@ -340,9 +240,7 @@ class Propagator:
                     self.static = True
                 if self.static is False:
                     break
-            # Check if potential is linear (independent of psi).
-            # If it depends on psi, it also depends on t and
-            # is therefore not static
+
             for i in range(len(self.potential_strings)):
                 for pot_string in self.potential_strings:
                     potential_nex = ne.NumExpr(pot_string)
@@ -357,42 +255,17 @@ class Propagator:
                 if self.linear is False:
                     self.static = False
                     break
-            # Check if number of matrix elements given matches
-            # the number diagonal or nondiagonal hermitian matrix
-            # elements. In the case of a diagonal matrix the number
-            # of matrix elements is equal to the number of internal
-            # states. If it is nondiagonal one gives the lower
-            # triangular part of V.
+
             self.diag = diag
             if diag is False:
-                self.num_int_dim = 1 / 2 * (np.sqrt(8 * self.num_v + 1) - 1)
+                self.num_int_dim = 1 / 2 * (self._sqrt(8 * self.num_v + 1) - 1)
                 assert (
                     self.num_int_dim.is_integer()
                 ), "Number of potential matrix elements incorrect"
                 self.num_int_dim = int(self.num_int_dim)
-            if diag is True:
+            else:
                 self.num_int_dim = len(self.potential_strings)
 
-
-@jit(nopython=True, parallel=True, nogil=True, fastmath=True)
-def get_eig(matrices, eigvals):
-    """
-    Calculate eigenvectors and eigenvalues of matrices in array.
-
-    JIT-compiled function that calculates the eigenvectors and
-    eigenvalues of input array M in parallel using numba.
-    The resulting eigenvectors are stored in the input matrix
-    and the eigenvalues in the array eigvals.
-
-    Parameters
-    ----------
-    M : 3d array of (NxN) arrays
-    eigvals : 3d array of 1d arrays with N elements
-    """
-    nX, nY, nZ = matrices.shape[:3]
-    for i in prange(nX):
-        for j in prange(nY):
-            for k in prange(nZ):
-                eigvals[i, j, k, :], matrices[i, j, k, :, :] = eigh(
-                    matrices[i, j, k, :, :]
-                )
+        @staticmethod
+        def _sqrt(x: float) -> float:
+            return float(x) ** 0.5

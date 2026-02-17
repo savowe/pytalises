@@ -21,6 +21,7 @@ Welcome to pytalises's documentation!
    examples
    additional_examples
    notes
+   v2_migration
    pytalises.rst
 
 

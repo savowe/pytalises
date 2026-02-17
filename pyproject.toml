@@ -60,4 +60,4 @@ zip-safe = false
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["pytalises"]
+include = ["pytalises", "pytalises.*"]
