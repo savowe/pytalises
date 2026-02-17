@@ -141,7 +141,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          QUERY='query ($input: PodFilterInput!) { pod(input: $input) { id desiredStatus runtime { ports { ip isIpPublic privatePort publicPort type } } } }'
+          QUERY='query ($input: PodFilter) { pod(input: $input) { id desiredStatus runtime { ports { ip isIpPublic privatePort publicPort type } } } }'
 
           for attempt in $(seq 1 90); do
             PAYLOAD=$(jq -n \
@@ -149,11 +149,31 @@ jobs:
               --arg podId "$POD_ID" \
               '{query: $query, variables: {input: {podId: $podId}}}')
 
-            RESPONSE=$(curl --silent --show-error --fail \
+            HTTP_BODY=$(mktemp)
+            HTTP_CODE=$(curl --silent --show-error \
+              --output "$HTTP_BODY" \
+              --write-out '%{http_code}' \
               --request POST \
               --header 'content-type: application/json' \
               --url "https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}" \
               --data "$PAYLOAD")
+
+            RESPONSE=$(cat "$HTTP_BODY")
+            rm -f "$HTTP_BODY"
+
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "Attempt ${attempt}: RunPod returned HTTP ${HTTP_CODE}; retrying..."
+              sleep 10
+              continue
+            fi
+
+            ERRORS=$(echo "$RESPONSE" | jq '.errors | length // 0')
+            if [ "$ERRORS" != "0" ]; then
+              echo "Attempt ${attempt}: GraphQL errors while waiting for pod endpoint:"
+              echo "$RESPONSE" | jq '.errors'
+              sleep 10
+              continue
+            fi
 
             STATUS=$(echo "$RESPONSE" | jq -r '.data.pod.desiredStatus // "UNKNOWN"')
 
