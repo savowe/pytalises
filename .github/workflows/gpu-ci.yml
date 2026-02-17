@@ -280,7 +280,8 @@ jobs:
 
           if [ "${RUN_BENCHMARKS}" = "true" ]; then
             python3 benchmarks/backend_benchmark.py \
-              --size 192 \
+              --sizes 128,192 \
+              --workloads free,potential \
               --steps 25 \
               --repeats 3 \
               --warmup 1 \
@@ -314,19 +315,36 @@ jobs:
           lines = [
               '## Backend benchmark summary',
               '',
-              '| Backend | Mean (s) | Std (s) |',
-              '|---|---:|---:|',
+              '| Backend | Workload | Grid | Mean (s) | Std (s) |',
+              '|---|---|---:|---:|---:|',
           ]
 
           for row in data.get('results', []):
               lines.append(
-                  f"| {row['backend']} | {row['mean_seconds']:.4f} | {row['std_seconds']:.4f} |"
+                  f"| {row['backend']} | {row['workload']} | {row['size']} | "
+                  f"{row['mean_seconds']:.4f} | {row['std_seconds']:.4f} |"
               )
 
-          speedup = data.get('speedup_numpy_over_cupy')
-          if speedup is not None:
+          speedups = data.get('speedups_numpy_over_cupy', {})
+          if speedups:
               lines.append('')
-              lines.append(f"**Speedup (NumPy/CuPy):** {speedup:.2f}x")
+              lines.append('**Speedups (NumPy/CuPy):**')
+              for key, value in sorted(speedups.items()):
+                  lines.append(f"- `{key}`: {value:.2f}x")
+
+          metadata = data.get('metadata', {})
+          if isinstance(metadata, dict):
+              lines.append('')
+              lines.append(
+                  f"**Host:** CPU cores={metadata.get('cpu_count')}, "
+                  f"backends={metadata.get('available_backends')}"
+              )
+              cuda = metadata.get('cuda')
+              if isinstance(cuda, dict):
+                  lines.append(
+                      f"**CUDA device:** {cuda.get('device_name')} "
+                      f"(CuPy {cuda.get('cupy_version')})"
+                  )
 
           parity = data.get('parity')
           if isinstance(parity, dict):

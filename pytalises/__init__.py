@@ -1,4 +1,5 @@
 from .backends import (  # noqa
+    available_backends,
     get_backend,
     has_cupy,
     register_backend,

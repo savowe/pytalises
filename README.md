@@ -49,14 +49,16 @@ CuPy support is optional and requires an NVIDIA CUDA environment.
 
 ### Backend accuracy and performance checks
 
-- Accuracy parity (NumPy vs CuPy) is covered by `tests/cupy_backend_test.py`.
+- Backend parity checks are covered by:
+  - `tests/backend_parity_test.py` (generic non-NumPy backends vs NumPy reference)
+  - `tests/cupy_backend_test.py` (CuPy-focused coverage)
 - Local benchmark utility:
 
 ```bash
-python benchmarks/backend_benchmark.py --size 192 --steps 25 --repeats 3
+python benchmarks/backend_benchmark.py --sizes 128,192 --workloads free,potential --steps 25 --repeats 3
 ```
 
-This prints NumPy/CuPy timings, estimated speedup, and basic parity metrics.
+This prints backend timings for multiple workloads/sizes, NumPy/CuPy speedups, host metadata, and parity metrics.
 
 ### Documentation
 Read the [documentation](https://pytalises.readthedocs.io/en/latest/) to learn more about pytalises' capabilities.

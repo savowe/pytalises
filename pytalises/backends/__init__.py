@@ -26,6 +26,11 @@ def register_backend(name: str, backend_class):
     _BACKENDS[name] = backend_class
 
 
+def available_backends() -> tuple[str, ...]:
+    """Return names of currently importable backends."""
+    return tuple(sorted(_BACKENDS.keys()))
+
+
 def has_cupy() -> bool:
     """Return ``True`` if a usable CuPy backend is available."""
     if "cupy" not in _BACKENDS:
