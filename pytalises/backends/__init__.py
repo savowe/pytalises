@@ -13,7 +13,7 @@ _BACKENDS = {
 
 try:  # optional dependency
     from .cupy_backend import CupyBackend
-except Exception:  # pragma: no cover - depends on optional runtime
+except ImportError:  # pragma: no cover - depends on optional runtime
     CupyBackend = None
 else:
     _BACKENDS["cupy"] = CupyBackend
@@ -64,6 +64,12 @@ def get_backend(name: Union[str, Backend, None] = None, **kwargs) -> Backend:
     if name not in _BACKENDS:
         available = sorted(_BACKENDS.keys())
         raise ValueError(f"Unknown backend '{name}'. Available: {available}")
+
+    if name == "cupy" and not has_cupy():
+        raise ValueError(
+            "CuPy backend requested but no usable CUDA device is available. "
+            "Install CuPy with CUDA support and ensure at least one visible GPU."
+        )
 
     return _BACKENDS[name](**kwargs)
 

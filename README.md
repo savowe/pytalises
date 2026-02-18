@@ -24,9 +24,12 @@
 import pytalises as pt
 
 grid = pt.Grid(shape=(256,), extent=((-4, 4),))
+backend = "cupy" if pt.has_cupy() else "numpy"
+
 psi = pt.Wavefunction(
     initial=["exp(-x**2)", "0"],
     grid=grid,
+    backend=backend,
 )
 
 V = pt.HermitianPotential.from_lower_triangular([
@@ -40,7 +43,7 @@ psi.propagate(
     steps=1000,
     dt=1e-6,
     variables={"Omega": 2.0, "Delta": 1.0},
-    options=pt.PropagationOptions(backend="cupy", threads=4),
+    options=pt.PropagationOptions(backend=backend, threads=4),
 )
 ```
 

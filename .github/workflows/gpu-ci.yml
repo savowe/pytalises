@@ -55,6 +55,12 @@ jobs:
         with:
           ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
 
+      - name: Resolve checkout SHA
+        id: resolve-sha
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Validate required secrets
         run: |
           set -euo pipefail
@@ -289,7 +295,7 @@ jobs:
           set -euo pipefail
 
           REPO='${{ github.repository }}'
-          SHA='${{ github.sha }}'
+          SHA='${{ steps.resolve-sha.outputs.sha }}'
           RUN_BENCH='${{ inputs.run_benchmarks }}'
           export REPO SHA RUN_BENCH
 

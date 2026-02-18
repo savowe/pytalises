@@ -10,13 +10,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
 import platform
 import sys
 import time
 from dataclasses import asdict, dataclass
-from pathlib import Path
 
 import numpy as np
+
+# Support direct script execution from repo root:
+#   python benchmarks/backend_benchmark.py ...
+if __package__ in (None, ""):
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
 
 import pytalises as pt
 
@@ -85,6 +92,9 @@ def _run_case(
         if run_idx < warmup:
             continue
         timings.append(elapsed)
+
+    if not timings:
+        raise RuntimeError("No benchmark timings collected; check repeats/warmup configuration.")
 
     arr = np.asarray(timings, dtype=float)
     return BenchmarkResult(
@@ -192,6 +202,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.repeats < 1:
+        parser.error("--repeats must be >= 1")
+    if args.warmup < 0:
+        parser.error("--warmup must be >= 0")
+
     sizes = [int(s) for s in _parse_csv(args.sizes)]
     workloads = _parse_csv(args.workloads)
 
@@ -273,7 +288,16 @@ def main() -> int:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
         args.json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    if args.min_speedup is not None and speedups:
+    if args.min_speedup is not None:
+        if "cupy" not in backends:
+            print(
+                "ERROR: --min-speedup requires CuPy benchmark results, "
+                "but CuPy is unavailable on this host."
+            )
+            return 1
+        if not speedups:
+            print("ERROR: --min-speedup requested but no NumPy/CuPy comparisons were produced.")
+            return 1
         if min(speedups.values()) < args.min_speedup:
             worst = min(speedups, key=speedups.get)
             print(

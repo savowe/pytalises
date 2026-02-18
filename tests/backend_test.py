@@ -1,6 +1,7 @@
 import pytest
 
 import pytalises as pt
+import pytalises.backends as backends
 
 
 def test_default_backend_is_registered_backend():
@@ -22,6 +23,13 @@ def test_requesting_cupy_backend_matches_availability():
     else:
         with pytest.raises(ValueError):
             pt.get_backend("cupy")
+
+
+@pytest.mark.skipif("cupy" not in pt.available_backends(), reason="CuPy backend module not importable")
+def test_requesting_cupy_backend_fails_fast_without_visible_device(monkeypatch):
+    monkeypatch.setattr(backends, "has_cupy", lambda: False)
+    with pytest.raises(ValueError, match="no usable CUDA device"):
+        backends.get_backend("cupy")
 
 
 @pytest.mark.skipif(not pt.has_cupy(), reason="CuPy backend not available")
