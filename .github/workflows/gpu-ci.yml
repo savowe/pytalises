@@ -12,6 +12,22 @@ on:
         required: false
         type: boolean
         default: true
+      benchmark_sizes:
+        description: "Comma-separated grid sizes (e.g. 128,192,512)"
+        required: false
+        default: "128,192"
+      benchmark_steps:
+        description: "Propagation steps per benchmark run"
+        required: false
+        default: "25"
+      benchmark_repeats:
+        description: "Benchmark repeats"
+        required: false
+        default: "3"
+      benchmark_warmup:
+        description: "Benchmark warmup iterations"
+        required: false
+        default: "1"
 
 concurrency:
   group: gpu-ci-${{ inputs.ref != '' && inputs.ref || github.ref }}
@@ -48,6 +64,10 @@ jobs:
       RUNPOD_VOLUME_GB: ${{ vars.RUNPOD_VOLUME_GB != '' && vars.RUNPOD_VOLUME_GB || '30' }}
       RUNPOD_CONTAINER_DISK_GB: ${{ vars.RUNPOD_CONTAINER_DISK_GB != '' && vars.RUNPOD_CONTAINER_DISK_GB || '30' }}
       RUN_BENCHMARKS: ${{ inputs.run_benchmarks && 'true' || 'false' }}
+      BENCHMARK_SIZES: ${{ inputs.benchmark_sizes != '' && inputs.benchmark_sizes || '128,192' }}
+      BENCHMARK_STEPS: ${{ inputs.benchmark_steps != '' && inputs.benchmark_steps || '25' }}
+      BENCHMARK_REPEATS: ${{ inputs.benchmark_repeats != '' && inputs.benchmark_repeats || '3' }}
+      BENCHMARK_WARMUP: ${{ inputs.benchmark_warmup != '' && inputs.benchmark_warmup || '1' }}
 
     steps:
       - name: Checkout repository
@@ -77,6 +97,17 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Validate benchmark parameters
+        run: |
+          set -euo pipefail
+          [[ "${BENCHMARK_SIZES}" =~ ^[0-9]+(,[0-9]+)*$ ]] || { echo "benchmark_sizes must be comma-separated positive integers"; exit 1; }
+          [[ "${BENCHMARK_STEPS}" =~ ^[0-9]+$ ]] || { echo "benchmark_steps must be a positive integer"; exit 1; }
+          [[ "${BENCHMARK_REPEATS}" =~ ^[0-9]+$ ]] || { echo "benchmark_repeats must be a positive integer"; exit 1; }
+          [[ "${BENCHMARK_WARMUP}" =~ ^[0-9]+$ ]] || { echo "benchmark_warmup must be a non-negative integer"; exit 1; }
+
+          [ "${BENCHMARK_STEPS}" -ge 1 ] || { echo "benchmark_steps must be >= 1"; exit 1; }
+          [ "${BENCHMARK_REPEATS}" -ge 1 ] || { echo "benchmark_repeats must be >= 1"; exit 1; }
 
       - name: Install workflow dependencies
         run: |
@@ -306,8 +337,12 @@ jobs:
 
           REPO='${{ github.repository }}'
           SHA='${{ steps.resolve-sha.outputs.sha }}'
-          RUN_BENCH='${{ inputs.run_benchmarks }}'
-          export REPO SHA RUN_BENCH
+          RUN_BENCH='${{ env.RUN_BENCHMARKS }}'
+          BENCH_SIZES='${{ env.BENCHMARK_SIZES }}'
+          BENCH_STEPS='${{ env.BENCHMARK_STEPS }}'
+          BENCH_REPEATS='${{ env.BENCHMARK_REPEATS }}'
+          BENCH_WARMUP='${{ env.BENCHMARK_WARMUP }}'
+          export REPO SHA RUN_BENCH BENCH_SIZES BENCH_STEPS BENCH_REPEATS BENCH_WARMUP
 
           cat > /tmp/pytalises-ci.sh <<'SCRIPT'
           #!/usr/bin/env bash
@@ -334,11 +369,11 @@ jobs:
 
           if [ "${RUN_BENCH}" = "true" ]; then
             python3 benchmarks/backend_benchmark.py \
-              --sizes 128,192 \
+              --sizes "${BENCH_SIZES}" \
               --workloads free,potential \
-              --steps 25 \
-              --repeats 3 \
-              --warmup 1 \
+              --steps "${BENCH_STEPS}" \
+              --repeats "${BENCH_REPEATS}" \
+              --warmup "${BENCH_WARMUP}" \
               --json-out /workspace/backend-benchmark.json
 
             python3 - <<'PY'
