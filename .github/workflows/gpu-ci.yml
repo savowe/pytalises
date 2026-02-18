@@ -233,7 +233,8 @@ jobs:
 
           SSH_TTY_FLAG=""
           if [ "${SSH_MODE}" = "proxy" ]; then
-            SSH_TTY_FLAG="-tt"
+            echo "Proxy mode detected; skipping explicit connectivity probe."
+            exit 0
           fi
 
           for attempt in $(seq 1 30); do
