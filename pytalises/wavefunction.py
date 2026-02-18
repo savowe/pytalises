@@ -89,7 +89,9 @@ class Wavefunction:
             if self.axes[i] == 0:
                 Delta_r.append(np.nan)
                 delta_k.append(np.nan)
-                k.append(0.0)
+                # Keep inactive reciprocal axes as 1D arrays for backend parity
+                # (CuPy meshgrid requires array-like inputs, not Python scalars).
+                k.append(self._backend.asarray([0.0]))
             else:
                 drange = r_max - r_min
                 Delta_r.append(drange)
