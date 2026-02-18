@@ -138,6 +138,18 @@ class Propagator:
         self._stage_seconds[name] += elapsed
         self._stage_calls[name] += 1
 
+    def _start_stage_timer(self) -> float:
+        if not self._profile_stages:
+            return 0.0
+        self._engine.synchronize()
+        return time.perf_counter()
+
+    def _stop_stage_timer(self, name: str, start: float) -> None:
+        if not self._profile_stages:
+            return
+        self._engine.synchronize()
+        self._record_stage(name, time.perf_counter() - start)
+
     def stage_timings(self) -> dict[str, dict[str, float | int]]:
         """Return accumulated stage timings for this propagator instance."""
         if not self._profile_stages:
@@ -155,12 +167,11 @@ class Propagator:
         self.prop_method(dt)
 
     def _refresh_eigendecomposition(self) -> None:
-        t0 = time.perf_counter() if self._profile_stages else 0.0
+        t0 = self._start_stage_timer()
         eigvals, eigvecs = self._engine.eigendecompose_hermitian(self.V_eval_array)
         self.V_eval_eigval_array[...] = eigvals
         self.V_eval_eigvec_array[...] = eigvecs
-        if self._profile_stages:
-            self._record_stage("_refresh_eigendecomposition", time.perf_counter() - t0)
+        self._stop_stage_timer("_refresh_eigendecomposition", t0)
 
     def nondiag_potential_prop(self, dt: float) -> None:
         """Apply potential step for non-diagonal potentials."""
@@ -168,32 +179,30 @@ class Propagator:
             self.eval_V()
             self._refresh_eigendecomposition()
 
-        t0 = time.perf_counter() if self._profile_stages else 0.0
+        t0 = self._start_stage_timer()
         self._engine.apply_coupled_phase(
             self.psi._amp,
             eigvals=self.V_eval_eigval_array,
             eigvecs=self.V_eval_eigvec_array,
             dt=dt,
         )
-        if self._profile_stages:
-            self._record_stage("apply_coupled_phase", time.perf_counter() - t0)
+        self._stop_stage_timer("apply_coupled_phase", t0)
 
     def diag_potential_prop(self, dt: float) -> None:
         """Apply potential step for diagonal potentials."""
         if self.v.static is False:
             self.eval_diag_V()
-        t0 = time.perf_counter() if self._profile_stages else 0.0
+        t0 = self._start_stage_timer()
         self._engine.apply_diagonal_phase(
             self.psi._amp,
             diagonal=self.V_eval_diag_array,
             dt=dt,
         )
-        if self._profile_stages:
-            self._record_stage("apply_diagonal_phase", time.perf_counter() - t0)
+        self._stop_stage_timer("apply_diagonal_phase", t0)
 
     def kinetic_prop(self, dt: float) -> None:
         """Perform kinetic propagation step in reciprocal space."""
-        t0 = time.perf_counter() if self._profile_stages else 0.0
+        t0 = self._start_stage_timer()
         self.psi.fft()
         self._engine.apply_kinetic_phase(
             self.psi._amp,
@@ -203,8 +212,7 @@ class Propagator:
         )
         self.psi.ifft()
         self.psi.t += dt
-        if self._profile_stages:
-            self._record_stage("kinetic_prop", time.perf_counter() - t0)
+        self._stop_stage_timer("kinetic_prop", t0)
 
     def _evaluation_scope(self) -> tuple[dict[str, Any], dict[str, Any]]:
         local_scope = {**self.v.variables, **self.psi.default_var_dict}
@@ -213,7 +221,7 @@ class Propagator:
 
     def eval_V(self) -> None:
         """Evaluate full potential matrix on the complete spatial grid."""
-        t0 = time.perf_counter() if self._profile_stages else 0.0
+        t0 = self._start_stage_timer()
         self.V_eval_array[...] = 0
 
         local_scope, global_scope = self._evaluation_scope()
@@ -229,12 +237,11 @@ class Propagator:
                 if i != j:
                     self.V_eval_array[:, :, :, i, j] = self._engine.xp.conjugate(eval_ji)
                 k += 1
-        if self._profile_stages:
-            self._record_stage("eval_V", time.perf_counter() - t0)
+        self._stop_stage_timer("eval_V", t0)
 
     def eval_diag_V(self) -> None:
         """Evaluate diagonal potential matrix elements."""
-        t0 = time.perf_counter() if self._profile_stages else 0.0
+        t0 = self._start_stage_timer()
         local_scope, global_scope = self._evaluation_scope()
         for i in range(self.psi.num_int_dim):
             self.V_eval_diag_array[:, :, :, i] = self._evaluator.eval(
@@ -242,8 +249,7 @@ class Propagator:
                 local_dict=local_scope,
                 global_dict=global_scope,
             )
-        if self._profile_stages:
-            self._record_stage("eval_diag_V", time.perf_counter() - t0)
+        self._stop_stage_timer("eval_diag_V", t0)
 
     class Potential:
         """Simple container for potential metadata."""

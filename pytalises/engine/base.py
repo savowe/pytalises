@@ -84,6 +84,10 @@ class Engine(ABC):
             * volume_element
         )
 
+    def synchronize(self) -> None:
+        """Synchronize outstanding backend work when needed for profiling."""
+        return None
+
     @abstractmethod
     def eigendecompose_hermitian(self, matrices: Any) -> tuple[Any, Any]:
         """Return eigenvalues and eigenvectors for Hermitian blocks."""

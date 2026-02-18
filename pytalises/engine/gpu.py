@@ -22,6 +22,9 @@ class GpuEngine(Engine):
         if device_count < 1:
             raise RuntimeError("CuPy backend selected but no CUDA device is available.")
 
+    def synchronize(self) -> None:
+        cp.cuda.Stream.null.synchronize()
+
     def eigendecompose_hermitian(self, matrices):
         eigvals, eigvecs = cp.linalg.eigh(matrices)
         return eigvals, eigvecs
