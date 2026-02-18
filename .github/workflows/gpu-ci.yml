@@ -230,9 +230,17 @@ jobs:
         run: |
           set -euo pipefail
           echo "Using SSH mode: ${SSH_MODE} (${SSH_USER}@${SSH_HOST}:${SSH_PORT})"
+
+          SSH_TTY_FLAG=""
+          if [ "${SSH_MODE}" = "proxy" ]; then
+            SSH_TTY_FLAG="-tt"
+          fi
+
           for attempt in $(seq 1 30); do
-            if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" 'echo connected'; then
+            OUT=$(ssh ${SSH_TTY_FLAG} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" 'echo connected' 2>&1 || true)
+            echo "$OUT"
+            if echo "$OUT" | grep -q "connected"; then
               exit 0
             fi
             echo "Attempt ${attempt}: waiting for SSH connectivity..."
@@ -295,11 +303,39 @@ jobs:
           SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
           SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
           SSH_USER: ${{ steps.wait-ssh.outputs.ssh_user }}
+          SSH_MODE: ${{ steps.wait-ssh.outputs.ssh_mode }}
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" \
-            'cat /workspace/backend-benchmark.json' > /tmp/backend-benchmark.json
+
+          SSH_TTY_FLAG=""
+          if [ "${SSH_MODE}" = "proxy" ]; then
+            SSH_TTY_FLAG="-tt"
+          fi
+
+          RAW_OUT=$(mktemp)
+          ssh ${SSH_TTY_FLAG} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" <<'REMOTE' > "$RAW_OUT"
+          python3 - <<'PY'
+          import base64
+          p = '/workspace/backend-benchmark.json'
+          with open(p, 'rb') as f:
+              data = f.read()
+          print('BEGIN_BENCHMARK_JSON_B64')
+          print(base64.b64encode(data).decode())
+          print('END_BENCHMARK_JSON_B64')
+          PY
+          REMOTE
+
+          B64=$(sed -n '/BEGIN_BENCHMARK_JSON_B64/,/END_BENCHMARK_JSON_B64/p' "$RAW_OUT" \
+            | sed '1d;$d' | tr -d '\r\n')
+          rm -f "$RAW_OUT"
+
+          if [ -z "$B64" ]; then
+            echo "Could not extract benchmark payload from SSH output"
+            exit 1
+          fi
+
+          printf '%s' "$B64" | base64 -d > /tmp/backend-benchmark.json
 
       - name: Add benchmark summary
         if: ${{ inputs.run_benchmarks }}
