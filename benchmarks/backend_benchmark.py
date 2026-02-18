@@ -61,6 +61,77 @@ def _make_problem(size: int):
     return grid, initial, potential
 
 
+def _run_profiled_propagation(
+    *,
+    psi,
+    workload: str,
+    potential,
+    steps: int,
+    dt: float,
+    options,
+) -> dict[str, dict[str, float | int]]:
+    if workload == "free":
+        propagator = pt.Propagator(
+            psi,
+            potential=pt.DiagonalPotential(["0"] * psi.num_int_dim),
+            variables={},
+            options=options,
+        )
+        for _ in range(steps):
+            propagator.kinetic_prop(dt)
+        return propagator.stage_timings()
+
+    if workload == "potential":
+        propagator = pt.Propagator(
+            psi,
+            potential=potential,
+            variables={},
+            options=options,
+        )
+        propagator.kinetic_prop(dt / 2)
+        propagator.potential_prop(dt)
+        for _ in range(steps - 1):
+            propagator.kinetic_prop(dt)
+            propagator.potential_prop(dt)
+        propagator.kinetic_prop(dt / 2)
+        return propagator.stage_timings()
+
+    raise ValueError(f"Unknown workload '{workload}'")
+
+
+def _summarize_stage_runs(
+    stage_runs: list[dict[str, dict[str, float | int]]],
+    case_mean_seconds: float,
+) -> dict[str, dict[str, float]]:
+    if not stage_runs:
+        return {}
+
+    stage_names = sorted({name for run in stage_runs for name in run})
+    summary: dict[str, dict[str, float]] = {}
+
+    for name in stage_names:
+        seconds = np.asarray(
+            [float(run.get(name, {}).get("seconds", 0.0)) for run in stage_runs],
+            dtype=float,
+        )
+        calls = np.asarray(
+            [float(run.get(name, {}).get("calls", 0.0)) for run in stage_runs],
+            dtype=float,
+        )
+
+        mean_seconds = float(np.mean(seconds))
+        summary[name] = {
+            "mean_seconds": mean_seconds,
+            "std_seconds": float(np.std(seconds)),
+            "mean_calls": float(np.mean(calls)),
+            "share_of_case_runtime": (
+                mean_seconds / case_mean_seconds if case_mean_seconds > 0 else 0.0
+            ),
+        }
+
+    return summary
+
+
 def _run_case(
     *,
     backend: str,
@@ -70,9 +141,10 @@ def _run_case(
     dt: float,
     repeats: int,
     warmup: int,
-) -> BenchmarkResult:
+) -> tuple[BenchmarkResult, dict[str, dict[str, float]]]:
     timings: list[float] = []
-    options = pt.PropagationOptions(backend=backend)
+    stage_runs: list[dict[str, dict[str, float | int]]] = []
+    options = pt.PropagationOptions(backend=backend, profile_stages=True)
 
     for run_idx in range(warmup + repeats):
         grid, initial, potential = _make_problem(size)
@@ -80,24 +152,27 @@ def _run_case(
 
         _sync_backend(backend)
         t0 = time.perf_counter()
-        if workload == "free":
-            psi.freely_propagate(steps=steps, dt=dt, options=options)
-        elif workload == "potential":
-            psi.propagate(potential=potential, steps=steps, dt=dt, options=options)
-        else:
-            raise ValueError(f"Unknown workload '{workload}'")
+        stage_profile = _run_profiled_propagation(
+            psi=psi,
+            workload=workload,
+            potential=potential,
+            steps=steps,
+            dt=dt,
+            options=options,
+        )
         _sync_backend(backend)
         elapsed = time.perf_counter() - t0
 
         if run_idx < warmup:
             continue
         timings.append(elapsed)
+        stage_runs.append(stage_profile)
 
     if not timings:
         raise RuntimeError("No benchmark timings collected; check repeats/warmup configuration.")
 
     arr = np.asarray(timings, dtype=float)
-    return BenchmarkResult(
+    result = BenchmarkResult(
         backend=backend,
         workload=workload,
         size=size,
@@ -107,6 +182,9 @@ def _run_case(
         mean_seconds=float(np.mean(arr)),
         std_seconds=float(np.std(arr)),
     )
+    stage_summary = _summarize_stage_runs(stage_runs, case_mean_seconds=result.mean_seconds)
+
+    return result, stage_summary
 
 
 def _parity_check(size: int, steps: int, dt: float) -> dict[str, float] | None:
@@ -215,24 +293,38 @@ def main() -> int:
         backends.append("cupy")
 
     results: list[BenchmarkResult] = []
+    stage_breakdown: list[dict[str, object]] = []
     for workload in workloads:
         for size in sizes:
             for backend in backends:
-                results.append(
-                    _run_case(
-                        backend=backend,
-                        workload=workload,
-                        size=size,
-                        steps=args.steps,
-                        dt=args.dt,
-                        repeats=args.repeats,
-                        warmup=args.warmup,
-                    )
+                result, stages = _run_case(
+                    backend=backend,
+                    workload=workload,
+                    size=size,
+                    steps=args.steps,
+                    dt=args.dt,
+                    repeats=args.repeats,
+                    warmup=args.warmup,
+                )
+                results.append(result)
+                stage_breakdown.append(
+                    {
+                        "backend": backend,
+                        "workload": workload,
+                        "size": size,
+                        "steps": args.steps,
+                        "dt": args.dt,
+                        "stages": stages,
+                        "profiled_stage_seconds_total": float(
+                            sum(stage["mean_seconds"] for stage in stages.values())
+                        ),
+                    }
                 )
 
     payload: dict[str, object] = {
         "metadata": _collect_metadata(),
         "results": [asdict(r) for r in results],
+        "stage_breakdown": stage_breakdown,
         "parity": _parity_check(
             size=max(sizes),
             steps=max(8, args.steps // 2),

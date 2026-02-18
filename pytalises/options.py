@@ -23,6 +23,7 @@ class PropagationOptions:
         "FFTW_ESTIMATE",
         "FFTW_DESTROY_INPUT",
     )
+    profile_stages: bool = False
 
     def __post_init__(self) -> None:
         if self.threads < 1:
