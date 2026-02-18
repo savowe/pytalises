@@ -102,13 +102,6 @@ class Propagator:
             and self.psi.num_int_dim == 2
         )
 
-        self._use_affine_precompute_diag = False
-        self._use_affine_precompute_full = False
-        self._affine_diag_a: Any | None = None
-        self._affine_diag_b: Any | None = None
-        self._affine_matrix_a: Any | None = None
-        self._affine_matrix_b: Any | None = None
-
         assert isinstance(psi, pytalises.wavefunction.Wavefunction)
         assert self.v.num_int_dim == self.psi.num_int_dim
         assert self.psi._amp.shape[-1] == self.psi.num_int_dim
@@ -137,8 +130,6 @@ class Propagator:
         else:
             self.prop_method = self.nondiag_potential_prop
 
-        self._configure_affine_time_precompute()
-
         if self.v.static is True:
             if self.v.diag is True:
                 self.eval_diag_V()
@@ -146,110 +137,6 @@ class Propagator:
                 self.eval_V()
                 if not self._use_analytic_2x2:
                     self._refresh_eigendecomposition()
-
-    def _to_scalar_float(self, value: Any) -> float:
-        if hasattr(value, "item"):
-            return float(value.item())
-        return float(value)
-
-    def _max_abs(self, value: Any) -> float:
-        xp = self._engine.xp
-        return self._to_scalar_float(xp.max(xp.abs(value)))
-
-    def _try_affine_decompose_time(
-        self,
-        expression: str,
-        local_scope: dict[str, Any],
-    ) -> tuple[Any, Any] | None:
-        eval_t0 = self._evaluator.eval(
-            expression,
-            local_dict=local_scope,
-            global_dict={"t": 0.0},
-        )
-        eval_t1 = self._evaluator.eval(
-            expression,
-            local_dict=local_scope,
-            global_dict={"t": 1.0},
-        )
-        eval_t2 = self._evaluator.eval(
-            expression,
-            local_dict=local_scope,
-            global_dict={"t": 2.0},
-        )
-
-        a = eval_t0
-        b = eval_t1 - eval_t0
-        residual = eval_t2 - (a + 2.0 * b)
-
-        scale = max(
-            1.0,
-            self._max_abs(eval_t0),
-            self._max_abs(eval_t1),
-            self._max_abs(eval_t2),
-        )
-        error = self._max_abs(residual)
-
-        if error <= 1e-12 + 1e-10 * scale:
-            return a, b
-        return None
-
-    def _build_affine_diag_precompute(self) -> bool:
-        local_scope, _ = self._evaluation_scope()
-        a_diag = self._engine.zeros(self.V_eval_diag_array.shape, dtype="complex128")
-        b_diag = self._engine.zeros(self.V_eval_diag_array.shape, dtype="complex128")
-
-        for i, expression in enumerate(self.v.potential_strings):
-            coeffs = self._try_affine_decompose_time(expression, local_scope)
-            if coeffs is None:
-                return False
-            a_diag[:, :, :, i] = coeffs[0]
-            b_diag[:, :, :, i] = coeffs[1]
-
-        self._affine_diag_a = a_diag
-        self._affine_diag_b = b_diag
-        self._use_affine_precompute_diag = True
-        return True
-
-    def _build_affine_full_precompute(self) -> bool:
-        local_scope, _ = self._evaluation_scope()
-        a_full = self._engine.zeros(self.V_eval_array.shape, dtype="complex128")
-        b_full = self._engine.zeros(self.V_eval_array.shape, dtype="complex128")
-
-        k = 0
-        for i in range(self.psi.num_int_dim):
-            for j in range(i, self.psi.num_int_dim):
-                coeffs = self._try_affine_decompose_time(
-                    self.v.potential_strings[k],
-                    local_scope,
-                )
-                if coeffs is None:
-                    return False
-
-                a_ji, b_ji = coeffs
-                a_full[:, :, :, j, i] = a_ji
-                b_full[:, :, :, j, i] = b_ji
-                if i != j:
-                    a_full[:, :, :, i, j] = self._engine.xp.conjugate(a_ji)
-                    b_full[:, :, :, i, j] = self._engine.xp.conjugate(b_ji)
-                k += 1
-
-        self._affine_matrix_a = a_full
-        self._affine_matrix_b = b_full
-        self._use_affine_precompute_full = True
-        return True
-
-    def _configure_affine_time_precompute(self) -> None:
-        if self.options.potential_precompute_mode != "auto":
-            return
-        if self.v.static is True:
-            return
-        if self.v.linear is False:
-            return
-
-        if self.v.diag is True:
-            self._build_affine_diag_precompute()
-        else:
-            self._build_affine_full_precompute()
 
     def _record_stage(self, name: str, elapsed: float) -> None:
         if not self._profile_stages:
@@ -352,17 +239,8 @@ class Propagator:
     def eval_V(self) -> None:
         """Evaluate full potential matrix on the complete spatial grid."""
         t0 = self._start_stage_timer()
-
-        if self._use_affine_precompute_full:
-            assert self._affine_matrix_a is not None
-            assert self._affine_matrix_b is not None
-            self.V_eval_array[...] = self._affine_matrix_b
-            self.V_eval_array *= self.psi.t
-            self.V_eval_array += self._affine_matrix_a
-            self._stop_stage_timer("eval_V", t0)
-            return
-
         self.V_eval_array[...] = 0
+
         local_scope, global_scope = self._evaluation_scope()
         k = 0
         for i in range(self.psi.num_int_dim):
@@ -381,16 +259,6 @@ class Propagator:
     def eval_diag_V(self) -> None:
         """Evaluate diagonal potential matrix elements."""
         t0 = self._start_stage_timer()
-
-        if self._use_affine_precompute_diag:
-            assert self._affine_diag_a is not None
-            assert self._affine_diag_b is not None
-            self.V_eval_diag_array[...] = self._affine_diag_b
-            self.V_eval_diag_array *= self.psi.t
-            self.V_eval_diag_array += self._affine_diag_a
-            self._stop_stage_timer("eval_diag_V", t0)
-            return
-
         local_scope, global_scope = self._evaluation_scope()
         for i in range(self.psi.num_int_dim):
             self.V_eval_diag_array[:, :, :, i] = self._evaluator.eval(

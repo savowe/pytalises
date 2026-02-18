@@ -25,7 +25,6 @@ class PropagationOptions:
     )
     profile_stages: bool = False
     coupled_2x2_mode: str = "auto"
-    potential_precompute_mode: str = "off"
 
     def __post_init__(self) -> None:
         if self.threads < 1:
@@ -33,8 +32,4 @@ class PropagationOptions:
         if self.coupled_2x2_mode not in {"auto", "eigh"}:
             raise ValueError(
                 "PropagationOptions.coupled_2x2_mode must be one of: 'auto', 'eigh'"
-            )
-        if self.potential_precompute_mode not in {"off", "auto"}:
-            raise ValueError(
-                "PropagationOptions.potential_precompute_mode must be one of: 'off', 'auto'"
             )

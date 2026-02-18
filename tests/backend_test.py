@@ -67,11 +67,6 @@ def test_coupled_2x2_mode_rejects_invalid_value():
         pt.PropagationOptions(coupled_2x2_mode="invalid")
 
 
-def test_potential_precompute_mode_rejects_invalid_value():
-    with pytest.raises(ValueError, match="potential_precompute_mode"):
-        pt.PropagationOptions(potential_precompute_mode="invalid")
-
-
 def test_analytic_2x2_path_matches_eigh_reference_numpy():
     grid = pt.Grid(shape=(64,), extent=((-3, 3),))
     initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]
@@ -111,58 +106,6 @@ def test_analytic_2x2_path_matches_eigh_reference_numpy():
     np.testing.assert_allclose(
         np.asarray(psi_auto.state_occupation()),
         np.asarray(psi_eigh.state_occupation()),
-        rtol=1e-10,
-        atol=1e-12,
-    )
-
-
-def test_affine_potential_precompute_matches_off_reference_numpy():
-    grid = pt.Grid(shape=(64,), extent=((-3, 3),))
-    initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]
-    potential = pt.HermitianPotential.from_lower_triangular(
-        [
-            "0.2*x**2 + 0.1*t",
-            "0.03*cos(x) + 0.02*t",
-            "0.1*x**2 - 0.05*t",
-        ]
-    )
-
-    psi_off = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="numpy")
-    psi_auto = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="numpy")
-
-    steps = 12
-    dt = 0.005
-
-    psi_off.propagate(
-        potential=potential,
-        steps=steps,
-        dt=dt,
-        options=pt.PropagationOptions(
-            backend="numpy",
-            coupled_2x2_mode="auto",
-            potential_precompute_mode="off",
-        ),
-    )
-    psi_auto.propagate(
-        potential=potential,
-        steps=steps,
-        dt=dt,
-        options=pt.PropagationOptions(
-            backend="numpy",
-            coupled_2x2_mode="auto",
-            potential_precompute_mode="auto",
-        ),
-    )
-
-    np.testing.assert_allclose(
-        np.abs(np.asarray(psi_auto.amp)) ** 2,
-        np.abs(np.asarray(psi_off.amp)) ** 2,
-        rtol=1e-10,
-        atol=1e-12,
-    )
-    np.testing.assert_allclose(
-        np.asarray(psi_auto.state_occupation()),
-        np.asarray(psi_off.state_occupation()),
         rtol=1e-10,
         atol=1e-12,
     )
