@@ -160,6 +160,7 @@ jobs:
         env:
           POD_ID: ${{ steps.create-pod.outputs.pod_id }}
           POD_HOST_ID: ${{ steps.create-pod.outputs.pod_host_id }}
+          RUN_BENCHMARKS: ${{ env.RUN_BENCHMARKS }}
         run: |
           set -euo pipefail
 
@@ -212,12 +213,16 @@ jobs:
             fi
 
             if [ "$STATUS" = "RUNNING" ] && [ -n "${POD_HOST_ID:-}" ]; then
-              echo "No public SSH endpoint yet; falling back to RunPod SSH proxy via ssh.runpod.io"
-              echo "ssh_host=ssh.runpod.io" >> "$GITHUB_OUTPUT"
-              echo "ssh_port=22" >> "$GITHUB_OUTPUT"
-              echo "ssh_user=$POD_HOST_ID" >> "$GITHUB_OUTPUT"
-              echo "ssh_mode=proxy" >> "$GITHUB_OUTPUT"
-              exit 0
+              if [ "${RUN_BENCHMARKS}" = "true" ]; then
+                echo "Attempt ${attempt}: pod is running but public SSH endpoint is not ready yet (benchmarks prefer public IP for SCP artifact transfer)."
+              else
+                echo "No public SSH endpoint yet; falling back to RunPod SSH proxy via ssh.runpod.io"
+                echo "ssh_host=ssh.runpod.io" >> "$GITHUB_OUTPUT"
+                echo "ssh_port=22" >> "$GITHUB_OUTPUT"
+                echo "ssh_user=$POD_HOST_ID" >> "$GITHUB_OUTPUT"
+                echo "ssh_mode=proxy" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
             fi
 
             echo "Attempt ${attempt}: status=${STATUS}, waiting for SSH endpoint..."
@@ -273,13 +278,11 @@ jobs:
           SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
           SSH_USER: ${{ steps.wait-ssh.outputs.ssh_user }}
           SSH_MODE: ${{ steps.wait-ssh.outputs.ssh_mode }}
+          RUN_BENCHMARKS: ${{ env.RUN_BENCHMARKS }}
         run: |
           set -euo pipefail
 
           SSH_TTY_FLAG=""
-          if [ "${SSH_MODE}" = "proxy" ]; then
-            SSH_TTY_FLAG="-tt"
-          fi
 
           SSH_LOG=$(mktemp)
           set +e
@@ -336,9 +339,7 @@ jobs:
           p = '/workspace/backend-benchmark.json'
           with open(p, 'rb') as f:
               data = f.read()
-          print('BEGIN_BENCHMARK_JSON_B64')
-          print(base64.b64encode(data).decode())
-          print('END_BENCHMARK_JSON_B64')
+          print('BENCHMARK_JSON_B64=' + base64.b64encode(data).decode())
           PY
           fi
           SCRIPT
@@ -367,16 +368,30 @@ jobs:
           fi
 
           if [ "${RUN_BENCHMARKS}" = "true" ]; then
-            B64=$(awk '
-              /^BEGIN_BENCHMARK_JSON_B64$/ {capture=1; next}
-              /^END_BENCHMARK_JSON_B64$/ {capture=0}
-              capture {print}
-            ' "$SSH_LOG" | tr -d '\r\n')
-            if [ -z "$B64" ]; then
-              echo "Could not extract benchmark payload from SSH output"
-              exit 1
+            if [ "${SSH_MODE}" = "public-ip" ]; then
+              timeout 5m scp \
+                -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null \
+                -o ConnectTimeout=10 \
+                -o ConnectionAttempts=1 \
+                -o BatchMode=yes \
+                -i ~/.ssh/id_runpod -P "$SSH_PORT" "$SSH_USER"@"$SSH_HOST":/workspace/backend-benchmark.json /tmp/backend-benchmark.json
+            else
+              echo "Public IP mode unavailable; falling back to benchmark payload extraction from SSH logs."
+              CLEAN_LOG=$(mktemp)
+              tr -d '\r' < "$SSH_LOG" \
+                | sed -r 's/\x1B\[[0-9;?]*[ -\/]*[@-~]//g' \
+                > "$CLEAN_LOG"
+
+              B64=$(grep -ao 'BENCHMARK_JSON_B64=[A-Za-z0-9+/=]\+' "$CLEAN_LOG" | tail -n1 | cut -d= -f2-)
+              if [ -z "$B64" ]; then
+                echo "Could not extract benchmark payload from SSH output"
+                rm -f "$CLEAN_LOG"
+                exit 1
+              fi
+              printf '%s' "$B64" | base64 -d > /tmp/backend-benchmark.json
+              rm -f "$CLEAN_LOG"
             fi
-            printf '%s' "$B64" | base64 -d > /tmp/backend-benchmark.json
           fi
 
           rm -f "$SSH_LOG"
