@@ -73,6 +73,46 @@ class Engine(ABC):
         tmp *= self.xp.exp(-1j * eigvals * dt)
         amp[...] = self.xp.matmul(eigvecs, tmp[..., self.xp.newaxis])[..., 0]
 
+    def apply_coupled_phase_2x2(self, amp: Any, *, matrix: Any, dt: float) -> None:
+        """Apply non-diagonal potential step for 2x2 Hermitian matrices.
+
+        Uses the closed-form matrix exponential of a Hermitian 2x2 block:
+        ``V = c I + [[z, b], [conj(b), -z]]``.
+        """
+        if amp.shape[-1] != 2 or matrix.shape[-2:] != (2, 2):
+            raise ValueError("apply_coupled_phase_2x2 requires 2x2 coupled amplitudes")
+
+        xp = self.xp
+
+        a = matrix[..., 0, 0]
+        d = matrix[..., 1, 1]
+        b = matrix[..., 0, 1]
+
+        c = 0.5 * (a + d)
+        z = 0.5 * (a - d)
+        r = xp.sqrt((z * xp.conjugate(z)).real + (b * xp.conjugate(b)).real)
+
+        phase = xp.exp(-1j * c * dt)
+        cos_term = xp.cos(r * dt)
+
+        eps = 1e-15
+        safe_r = xp.where(r > eps, r, 1.0)
+        sin_over_r = xp.sin(r * dt) / safe_r
+        sin_over_r = xp.where(r > eps, sin_over_r, dt)
+
+        u00 = cos_term - 1j * sin_over_r * z
+        u11 = cos_term + 1j * sin_over_r * z
+        u01 = -1j * sin_over_r * b
+        u10 = -1j * sin_over_r * xp.conjugate(b)
+
+        psi0 = amp[..., 0]
+        psi1 = amp[..., 1]
+        new0 = phase * (u00 * psi0 + u01 * psi1)
+        new1 = phase * (u10 * psi0 + u11 * psi1)
+
+        amp[..., 0] = new0
+        amp[..., 1] = new1
+
     def inner_product(self, lhs: Any, rhs: Any, *, volume_element: float) -> Any:
         """Return <lhs|rhs> including spatial volume element."""
         return self.xp.sum(lhs * self.xp.conjugate(rhs)) * volume_element

@@ -124,3 +124,49 @@ def test_cupy_backend_einsum_out_semantics():
 
     np.testing.assert_allclose(cp.asnumpy(out), cp.asnumpy(cp.einsum("ij,j->i", a, b)))
     assert result is out
+
+
+def test_cupy_analytic_2x2_matches_eigh_reference():
+    grid = g1(96, -4, 4)
+    initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]
+    potential = pt.HermitianPotential.from_lower_triangular(
+        [
+            "0.2*x**2 + 0.1*t",
+            "0.03*cos(x) + 0.02*sin(t)",
+            "0.1*x**2 - 0.05*t",
+        ]
+    )
+
+    psi_auto = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="cupy")
+    psi_eigh = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="cupy")
+
+    steps = 10
+    dt = 0.005
+    psi_auto.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(backend="cupy", coupled_2x2_mode="auto"),
+    )
+    psi_eigh.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(backend="cupy", coupled_2x2_mode="eigh"),
+    )
+
+    amp_auto = _to_numpy(psi_auto.amp)
+    amp_eigh = _to_numpy(psi_eigh.amp)
+
+    np.testing.assert_allclose(
+        np.abs(amp_auto) ** 2,
+        np.abs(amp_eigh) ** 2,
+        rtol=5e-5,
+        atol=5e-7,
+    )
+    np.testing.assert_allclose(
+        _to_numpy(psi_auto.state_occupation()),
+        _to_numpy(psi_eigh.state_occupation()),
+        rtol=5e-5,
+        atol=5e-7,
+    )

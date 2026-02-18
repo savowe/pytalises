@@ -24,7 +24,12 @@ class PropagationOptions:
         "FFTW_DESTROY_INPUT",
     )
     profile_stages: bool = False
+    coupled_2x2_mode: str = "auto"
 
     def __post_init__(self) -> None:
         if self.threads < 1:
             raise ValueError("PropagationOptions.threads must be >= 1")
+        if self.coupled_2x2_mode not in {"auto", "eigh"}:
+            raise ValueError(
+                "PropagationOptions.coupled_2x2_mode must be one of: 'auto', 'eigh'"
+            )

@@ -96,6 +96,11 @@ class Propagator:
             variables=variables or {},
             num_int_dim=psi.num_int_dim,
         )
+        self._use_analytic_2x2 = (
+            self.options.coupled_2x2_mode == "auto"
+            and self.v.diag is False
+            and self.psi.num_int_dim == 2
+        )
 
         assert isinstance(psi, pytalises.wavefunction.Wavefunction)
         assert self.v.num_int_dim == self.psi.num_int_dim
@@ -130,7 +135,8 @@ class Propagator:
                 self.eval_diag_V()
             else:
                 self.eval_V()
-                self._refresh_eigendecomposition()
+                if not self._use_analytic_2x2:
+                    self._refresh_eigendecomposition()
 
     def _record_stage(self, name: str, elapsed: float) -> None:
         if not self._profile_stages:
@@ -177,7 +183,18 @@ class Propagator:
         """Apply potential step for non-diagonal potentials."""
         if self.v.static is False:
             self.eval_V()
-            self._refresh_eigendecomposition()
+            if not self._use_analytic_2x2:
+                self._refresh_eigendecomposition()
+
+        if self._use_analytic_2x2:
+            t0 = self._start_stage_timer()
+            self._engine.apply_coupled_phase_2x2(
+                self.psi._amp,
+                matrix=self.V_eval_array,
+                dt=dt,
+            )
+            self._stop_stage_timer("apply_coupled_phase_analytic_2x2", t0)
+            return
 
         t0 = self._start_stage_timer()
         self._engine.apply_coupled_phase(

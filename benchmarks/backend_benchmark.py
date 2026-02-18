@@ -141,10 +141,15 @@ def _run_case(
     dt: float,
     repeats: int,
     warmup: int,
+    coupled_2x2_mode: str,
 ) -> tuple[BenchmarkResult, dict[str, dict[str, float]]]:
     timings: list[float] = []
     stage_runs: list[dict[str, dict[str, float | int]]] = []
-    options = pt.PropagationOptions(backend=backend, profile_stages=True)
+    options = pt.PropagationOptions(
+        backend=backend,
+        profile_stages=True,
+        coupled_2x2_mode=coupled_2x2_mode,
+    )
 
     for run_idx in range(warmup + repeats):
         grid, initial, potential = _make_problem(size)
@@ -187,7 +192,13 @@ def _run_case(
     return result, stage_summary
 
 
-def _parity_check(size: int, steps: int, dt: float) -> dict[str, float] | None:
+def _parity_check(
+    size: int,
+    steps: int,
+    dt: float,
+    *,
+    coupled_2x2_mode: str,
+) -> dict[str, float] | None:
     if not pt.has_cupy():
         return None
 
@@ -201,13 +212,19 @@ def _parity_check(size: int, steps: int, dt: float) -> dict[str, float] | None:
         potential=potential,
         steps=steps,
         dt=dt,
-        options=pt.PropagationOptions(backend="numpy"),
+        options=pt.PropagationOptions(
+            backend="numpy",
+            coupled_2x2_mode=coupled_2x2_mode,
+        ),
     )
     psi_cp.propagate(
         potential=potential,
         steps=steps,
         dt=dt,
-        options=pt.PropagationOptions(backend="cupy"),
+        options=pt.PropagationOptions(
+            backend="cupy",
+            coupled_2x2_mode=coupled_2x2_mode,
+        ),
     )
 
     amp_np = np.asarray(psi_np.amp)
@@ -278,6 +295,12 @@ def main() -> int:
         default=None,
         help="Fail if CuPy speedup over NumPy is below this threshold",
     )
+    parser.add_argument(
+        "--coupled-2x2-mode",
+        choices=("auto", "eigh"),
+        default="auto",
+        help="Potential-step strategy for 2x2 coupled systems",
+    )
     args = parser.parse_args()
 
     if args.repeats < 1:
@@ -305,6 +328,7 @@ def main() -> int:
                     dt=args.dt,
                     repeats=args.repeats,
                     warmup=args.warmup,
+                    coupled_2x2_mode=args.coupled_2x2_mode,
                 )
                 results.append(result)
                 stage_breakdown.append(
@@ -314,6 +338,7 @@ def main() -> int:
                         "size": size,
                         "steps": args.steps,
                         "dt": args.dt,
+                        "coupled_2x2_mode": args.coupled_2x2_mode,
                         "stages": stages,
                         "profiled_stage_seconds_total": float(
                             sum(stage["mean_seconds"] for stage in stages.values())
@@ -323,16 +348,21 @@ def main() -> int:
 
     payload: dict[str, object] = {
         "metadata": _collect_metadata(),
+        "config": {
+            "coupled_2x2_mode": args.coupled_2x2_mode,
+        },
         "results": [asdict(r) for r in results],
         "stage_breakdown": stage_breakdown,
         "parity": _parity_check(
             size=max(sizes),
             steps=max(8, args.steps // 2),
             dt=args.dt,
+            coupled_2x2_mode=args.coupled_2x2_mode,
         ),
     }
 
     print("Backend benchmark results:")
+    print(f"- coupled 2x2 mode: {args.coupled_2x2_mode}")
     for r in results:
         print(
             f"- {r.backend:>5} | {r.workload:>9} | n={r.size:>4}: "
