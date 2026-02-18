@@ -261,7 +261,7 @@ jobs:
           echo "SSH never became reachable"
           exit 1
 
-      - name: Upload source and run GPU tests in pod
+      - name: Upload source, run GPU tests, and collect benchmark output
         env:
           SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
           SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
@@ -275,13 +275,21 @@ jobs:
             SSH_TTY_FLAG="-tt"
           fi
 
+          SSH_LOG=$(mktemp)
+          set +e
           timeout 30m ssh ${SSH_TTY_FLAG} \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=10 \
             -o ConnectionAttempts=1 \
             -o BatchMode=yes \
-            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" <<REMOTE
+            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" \
+            "GITHUB_REPOSITORY='${GITHUB_REPOSITORY}' GITHUB_SHA='${GITHUB_SHA}' RUN_BENCHMARKS='${RUN_BENCHMARKS}' bash -se" \
+            <<'REMOTE' > "$SSH_LOG" 2>&1
+          set -euo pipefail
+
+          cat > /tmp/pytalises-ci.sh <<'SCRIPT'
+          #!/usr/bin/env bash
           set -euo pipefail
 
           if ! command -v python3 >/dev/null 2>&1; then
@@ -311,33 +319,8 @@ jobs:
               --repeats 3 \
               --warmup 1 \
               --json-out /workspace/backend-benchmark.json
-          fi
-          REMOTE
 
-      - name: Fetch benchmark artifact from pod
-        if: ${{ inputs.run_benchmarks }}
-        env:
-          SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
-          SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
-          SSH_USER: ${{ steps.wait-ssh.outputs.ssh_user }}
-          SSH_MODE: ${{ steps.wait-ssh.outputs.ssh_mode }}
-        run: |
-          set -euo pipefail
-
-          SSH_TTY_FLAG=""
-          if [ "${SSH_MODE}" = "proxy" ]; then
-            SSH_TTY_FLAG="-tt"
-          fi
-
-          RAW_OUT=$(mktemp)
-          timeout 5m ssh ${SSH_TTY_FLAG} \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=10 \
-            -o ConnectionAttempts=1 \
-            -o BatchMode=yes \
-            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" <<'REMOTE' > "$RAW_OUT"
-          python3 - <<'PY'
+            python3 - <<'PY'
           import base64
           p = '/workspace/backend-benchmark.json'
           with open(p, 'rb') as f:
@@ -346,18 +329,43 @@ jobs:
           print(base64.b64encode(data).decode())
           print('END_BENCHMARK_JSON_B64')
           PY
+          fi
+          SCRIPT
+
+          chmod +x /tmp/pytalises-ci.sh
+          set +e
+          /tmp/pytalises-ci.sh
+          EC=$?
+          set -e
+          echo "__RUNPOD_EXIT_CODE__:${EC}"
+          exit "$EC"
           REMOTE
+          SSH_RC=$?
+          set -e
 
-          B64=$(sed -n '/BEGIN_BENCHMARK_JSON_B64/,/END_BENCHMARK_JSON_B64/p' "$RAW_OUT" \
-            | sed '1d;$d' | tr -d '\r\n')
-          rm -f "$RAW_OUT"
+          cat "$SSH_LOG"
 
-          if [ -z "$B64" ]; then
-            echo "Could not extract benchmark payload from SSH output"
+          REMOTE_EC=$(grep -o '__RUNPOD_EXIT_CODE__:[0-9]\+' "$SSH_LOG" | tail -n1 | cut -d: -f2)
+          if [ -z "${REMOTE_EC:-}" ]; then
+            echo "Remote exit marker missing"
+            exit 1
+          fi
+          if [ "$SSH_RC" -ne 0 ] || [ "$REMOTE_EC" -ne 0 ]; then
+            echo "Remote CI script failed (ssh_rc=$SSH_RC, remote_ec=$REMOTE_EC)"
             exit 1
           fi
 
-          printf '%s' "$B64" | base64 -d > /tmp/backend-benchmark.json
+          if [ "${RUN_BENCHMARKS}" = "true" ]; then
+            B64=$(sed -n '/BEGIN_BENCHMARK_JSON_B64/,/END_BENCHMARK_JSON_B64/p' "$SSH_LOG" \
+              | sed '1d;$d' | tr -d '\r\n')
+            if [ -z "$B64" ]; then
+              echo "Could not extract benchmark payload from SSH output"
+              exit 1
+            fi
+            printf '%s' "$B64" | base64 -d > /tmp/backend-benchmark.json
+          fi
+
+          rm -f "$SSH_LOG"
 
       - name: Add benchmark summary
         if: ${{ inputs.run_benchmarks }}

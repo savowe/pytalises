@@ -103,7 +103,11 @@ class CupyBackend(Backend):
         if global_dict:
             scope.update(global_dict)
         scope.update(local_dict)
-        return eval(expr, {"__builtins__": {}}, scope)
+
+        # CuPy ufunc dispatch may rely on importing internals at runtime.
+        # Keep builtins locked down except for __import__ to avoid KeyError.
+        safe_builtins = {"__import__": __import__}
+        return eval(expr, {"__builtins__": safe_builtins}, scope)
 
     def eigh(self, matrices):
         eigvals, eigvecs = cp.linalg.eigh(matrices)
