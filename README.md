@@ -47,6 +47,10 @@ psi.propagate(
 For migration details from the pre-v2 API, see `docs/source/v2_migration.rst`.
 CuPy support is optional and requires an NVIDIA CUDA environment.
 
+Note: backend/engine internals are intentionally private and may change.
+The stable public surface is `Grid`, `Wavefunction`, propagation functions,
+and structured potential/options APIs.
+
 ### Backend accuracy and performance checks
 
 - Backend parity checks are covered by:

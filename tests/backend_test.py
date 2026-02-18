@@ -33,3 +33,21 @@ def test_wavefunction_can_run_on_cupy_backend():
     psi.freely_propagate(steps=2, dt=0.01)
     occ = psi.state_occupation()
     assert occ.shape == (1,)
+
+
+def test_core_propagation_path_does_not_use_backend_einsum(monkeypatch):
+    grid = pt.Grid(shape=(32,), extent=((-2, 2),))
+    psi = pt.Wavefunction("exp(-x**2)", grid=grid, backend="numpy")
+
+    def _unexpected_einsum(*args, **kwargs):
+        raise AssertionError("Propagation should not call backend.einsum in v2 core path")
+
+    monkeypatch.setattr(psi._backend, "einsum", _unexpected_einsum)
+
+    psi.freely_propagate(steps=2, dt=0.01)
+    psi.propagate(
+        potential=pt.DiagonalPotential("0.1*x**2"),
+        steps=2,
+        dt=0.01,
+        options=pt.PropagationOptions(backend="numpy"),
+    )

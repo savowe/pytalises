@@ -110,3 +110,17 @@ def test_cupy_matches_numpy_reference_dynamics():
         rtol=5e-5,
         atol=5e-7,
     )
+
+
+def test_cupy_backend_einsum_out_semantics():
+    cp = pytest.importorskip("cupy")
+    backend = pt.get_backend("cupy")
+
+    a = cp.arange(6, dtype=cp.float64).reshape(2, 3)
+    b = cp.arange(3, dtype=cp.float64)
+    out = cp.empty((2,), dtype=cp.float64)
+
+    result = backend.einsum("ij,j->i", a, b, out=out)
+
+    np.testing.assert_allclose(cp.asnumpy(out), cp.asnumpy(cp.einsum("ij,j->i", a, b)))
+    assert result is out

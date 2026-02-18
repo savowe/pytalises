@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import numexpr as ne
 
+from pytalises.engine import ExpressionEvaluator
 from pytalises.options import PropagationOptions
 from pytalises.potentials import BasePotential, zero_potential
 
@@ -80,7 +81,9 @@ class Propagator:
             )
 
         self._backend = self.psi._backend
-        self._backend.set_num_threads(self.options.threads)
+        self._engine = self.psi._engine
+        self._engine.set_num_threads(self.options.threads)
+        self._evaluator = ExpressionEvaluator(backend_name=self._backend.name)
 
         self.v = self.Potential.from_potential(
             potential=potential,
@@ -92,12 +95,20 @@ class Propagator:
         assert self.v.num_int_dim == self.psi.num_int_dim
         assert self.psi._amp.shape[-1] == self.psi.num_int_dim
 
-        self.V_eval_array = self._backend.zeros(
+        self.V_eval_array = self._engine.zeros(
             psi.number_of_grid_points + (psi.num_int_dim, psi.num_int_dim),
             dtype="complex128",
         )
-        self.V_eval_eigval_array = self._backend.zeros(
+        self.V_eval_diag_array = self._engine.zeros(
             psi.number_of_grid_points + (psi.num_int_dim,),
+            dtype="complex128",
+        )
+        self.V_eval_eigval_array = self._engine.zeros(
+            psi.number_of_grid_points + (psi.num_int_dim,),
+            dtype="complex128",
+        )
+        self.V_eval_eigvec_array = self._engine.zeros(
+            psi.number_of_grid_points + (psi.num_int_dim, psi.num_int_dim),
             dtype="complex128",
         )
 
@@ -113,87 +124,83 @@ class Propagator:
                 self.eval_diag_V()
             else:
                 self.eval_V()
-                self.V_eval_eigval_array, self.V_eval_array = self._backend.eigh(
-                    self.V_eval_array
-                )
+                self._refresh_eigendecomposition()
 
     def potential_prop(self, dt: float) -> None:
         """Apply potential propagator step."""
         self.prop_method(dt)
 
+    def _refresh_eigendecomposition(self) -> None:
+        eigvals, eigvecs = self._engine.eigendecompose_hermitian(self.V_eval_array)
+        self.V_eval_eigval_array[...] = eigvals
+        self.V_eval_eigvec_array[...] = eigvecs
+
     def nondiag_potential_prop(self, dt: float) -> None:
         """Apply potential step for non-diagonal potentials."""
         if self.v.static is False:
             self.eval_V()
-            self.V_eval_eigval_array, self.V_eval_array = self._backend.eigh(
-                self.V_eval_array
-            )
-        self._backend.einsum(
-            "xyzij,xyzj,xyzkj,xyzk->xyzi",
-            self.V_eval_array,
-            self._backend.evaluate(
-                "exp(-1j*eigval*dt)",
-                local_dict={"eigval": self.V_eval_eigval_array, "dt": dt},
-            ),
-            self._backend.conjugate(self.V_eval_array),
+            self._refresh_eigendecomposition()
+
+        self._engine.apply_coupled_phase(
             self.psi._amp,
-            out=self.psi._amp,
+            eigvals=self.V_eval_eigval_array,
+            eigvecs=self.V_eval_eigvec_array,
+            dt=dt,
         )
 
     def diag_potential_prop(self, dt: float) -> None:
         """Apply potential step for diagonal potentials."""
         if self.v.static is False:
             self.eval_diag_V()
-        self._backend.einsum(
-            "xyzii,xyzi->xyzi",
-            self._backend.evaluate(
-                "exp(-1j*V*dt)",
-                local_dict={"V": self.V_eval_array, "dt": dt},
-            ),
+        self._engine.apply_diagonal_phase(
             self.psi._amp,
-            out=self.psi._amp,
+            diagonal=self.V_eval_diag_array,
+            dt=dt,
         )
 
     def kinetic_prop(self, dt: float) -> None:
         """Perform kinetic propagation step in reciprocal space."""
         self.psi.fft()
-        self._backend.einsum(
-            "xyz,xyzi->xyzi",
-            self._backend.evaluate(
-                "exp(-1j*alpha*dt*(kx**2+ky**2+kz**2))",
-                local_dict={
-                    "kx": self.psi.kmesh[0],
-                    "ky": self.psi.kmesh[1],
-                    "kz": self.psi.kmesh[2],
-                    "alpha": self.psi.alpha,
-                    "dt": dt,
-                },
-            ),
+        self._engine.apply_kinetic_phase(
             self.psi._amp,
-            out=self.psi._amp,
+            kmesh=(self.psi.kmesh[0], self.psi.kmesh[1], self.psi.kmesh[2]),
+            alpha=self.psi.alpha,
+            dt=dt,
         )
         self.psi.ifft()
         self.psi.t += dt
 
+    def _evaluation_scope(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        local_scope = {**self.v.variables, **self.psi.default_var_dict}
+        global_scope = {"t": self.psi.t}
+        return local_scope, global_scope
+
     def eval_V(self) -> None:
         """Evaluate full potential matrix on the complete spatial grid."""
+        self.V_eval_array[...] = 0
+
+        local_scope, global_scope = self._evaluation_scope()
         k = 0
         for i in range(self.psi.num_int_dim):
             for j in range(i, self.psi.num_int_dim):
-                self.V_eval_array[:, :, :, j, i] = self._backend.evaluate(
+                eval_ji = self._evaluator.eval(
                     self.v.potential_strings[k],
-                    local_dict={**self.v.variables, **self.psi.default_var_dict},
-                    global_dict={"t": self.psi.t},
+                    local_dict=local_scope,
+                    global_dict=global_scope,
                 )
+                self.V_eval_array[:, :, :, j, i] = eval_ji
+                if i != j:
+                    self.V_eval_array[:, :, :, i, j] = self._engine.xp.conjugate(eval_ji)
                 k += 1
 
     def eval_diag_V(self) -> None:
         """Evaluate diagonal potential matrix elements."""
+        local_scope, global_scope = self._evaluation_scope()
         for i in range(self.psi.num_int_dim):
-            self.V_eval_array[:, :, :, i, i] = self._backend.evaluate(
+            self.V_eval_diag_array[:, :, :, i] = self._evaluator.eval(
                 self.v.potential_strings[i],
-                local_dict={**self.v.variables, **self.psi.default_var_dict},
-                global_dict={"t": self.psi.t},
+                local_dict=local_scope,
+                global_dict=global_scope,
             )
 
     class Potential:

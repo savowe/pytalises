@@ -16,6 +16,15 @@ Quick mapping
 - optional GPU execution -> ``PropagationOptions(backend="cupy")`` with
   ``Wavefunction(..., backend="cupy")``
 
+Backend internals
+-----------------
+
+The backend/engine internals are private implementation details in v2.
+Only the public simulation API is considered stable:
+:class:`pytalises.Grid`, :class:`pytalises.Wavefunction`,
+:func:`pytalises.propagate`, :func:`pytalises.freely_propagate`, and
+structured potentials/options.
+
 Example (before)
 ----------------
 

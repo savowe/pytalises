@@ -96,10 +96,11 @@ class CupyBackend(Backend):
         return cp.exp(x)
 
     def einsum(self, subscripts: str, *operands, out=None):
-        kwargs = {"optimize": "greedy"}
+        result = cp.einsum(subscripts, *operands, optimize="greedy")
         if out is not None:
-            kwargs["out"] = out
-        return cp.einsum(subscripts, *operands, **kwargs)
+            out[...] = result
+            return out
+        return result
 
     def evaluate(self, expr: str, local_dict: dict, global_dict: dict | None = None):
         scope = dict(self._eval_globals)
