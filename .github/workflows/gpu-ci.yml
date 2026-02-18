@@ -213,10 +213,14 @@ jobs:
             fi
 
             if [ "$STATUS" = "RUNNING" ] && [ -n "${POD_HOST_ID:-}" ]; then
-              if [ "${RUN_BENCHMARKS}" = "true" ]; then
+              if [ "${RUN_BENCHMARKS}" = "true" ] && [ "$attempt" -lt 18 ]; then
                 echo "Attempt ${attempt}: pod is running but public SSH endpoint is not ready yet (benchmarks prefer public IP for SCP artifact transfer)."
               else
-                echo "No public SSH endpoint yet; falling back to RunPod SSH proxy via ssh.runpod.io"
+                if [ "${RUN_BENCHMARKS}" = "true" ]; then
+                  echo "Public SSH endpoint still unavailable after waiting; falling back to RunPod SSH proxy with log-based benchmark payload extraction."
+                else
+                  echo "No public SSH endpoint yet; falling back to RunPod SSH proxy via ssh.runpod.io"
+                fi
                 echo "ssh_host=ssh.runpod.io" >> "$GITHUB_OUTPUT"
                 echo "ssh_port=22" >> "$GITHUB_OUTPUT"
                 echo "ssh_user=$POD_HOST_ID" >> "$GITHUB_OUTPUT"
@@ -283,6 +287,9 @@ jobs:
           set -euo pipefail
 
           SSH_TTY_FLAG=""
+          if [ "${SSH_MODE}" = "proxy" ]; then
+            SSH_TTY_FLAG="-tt"
+          fi
 
           SSH_LOG=$(mktemp)
           set +e
