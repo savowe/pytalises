@@ -237,12 +237,23 @@ jobs:
           fi
 
           for attempt in $(seq 1 30); do
-            OUT=$(ssh ${SSH_TTY_FLAG} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-              -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" 'echo connected' 2>&1 || true)
+            set +e
+            OUT=$(timeout 20s ssh ${SSH_TTY_FLAG} \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=8 \
+              -o ConnectionAttempts=1 \
+              -o BatchMode=yes \
+              -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" \
+              'echo connected; exit' 2>&1)
+            SSH_RC=$?
+            set -e
+
             echo "$OUT"
-            if echo "$OUT" | grep -q "connected"; then
+            if [ "$SSH_RC" -eq 0 ] && echo "$OUT" | grep -q "connected"; then
               exit 0
             fi
+
             echo "Attempt ${attempt}: waiting for SSH connectivity..."
             sleep 10
           done
@@ -263,7 +274,12 @@ jobs:
             SSH_TTY_FLAG="-tt"
           fi
 
-          ssh ${SSH_TTY_FLAG} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          timeout 30m ssh ${SSH_TTY_FLAG} \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 \
+            -o ConnectionAttempts=1 \
+            -o BatchMode=yes \
             -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" <<REMOTE
           set -euo pipefail
 
@@ -313,7 +329,12 @@ jobs:
           fi
 
           RAW_OUT=$(mktemp)
-          ssh ${SSH_TTY_FLAG} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          timeout 5m ssh ${SSH_TTY_FLAG} \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 \
+            -o ConnectionAttempts=1 \
+            -o BatchMode=yes \
             -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" <<'REMOTE' > "$RAW_OUT"
           python3 - <<'PY'
           import base64
