@@ -170,3 +170,57 @@ def test_cupy_analytic_2x2_matches_eigh_reference():
         rtol=5e-5,
         atol=5e-7,
     )
+
+
+def test_cupy_affine_precompute_matches_off_reference():
+    grid = g1(96, -4, 4)
+    initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]
+    potential = pt.HermitianPotential.from_lower_triangular(
+        [
+            "0.2*x**2 + 0.1*t",
+            "0.03*cos(x) + 0.02*t",
+            "0.1*x**2 - 0.05*t",
+        ]
+    )
+
+    psi_off = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="cupy")
+    psi_auto = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="cupy")
+
+    steps = 10
+    dt = 0.005
+    psi_off.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(
+            backend="cupy",
+            coupled_2x2_mode="auto",
+            potential_precompute_mode="off",
+        ),
+    )
+    psi_auto.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(
+            backend="cupy",
+            coupled_2x2_mode="auto",
+            potential_precompute_mode="auto",
+        ),
+    )
+
+    amp_off = _to_numpy(psi_off.amp)
+    amp_auto = _to_numpy(psi_auto.amp)
+
+    np.testing.assert_allclose(
+        np.abs(amp_auto) ** 2,
+        np.abs(amp_off) ** 2,
+        rtol=5e-5,
+        atol=5e-7,
+    )
+    np.testing.assert_allclose(
+        _to_numpy(psi_auto.state_occupation()),
+        _to_numpy(psi_off.state_occupation()),
+        rtol=5e-5,
+        atol=5e-7,
+    )

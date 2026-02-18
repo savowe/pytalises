@@ -142,6 +142,7 @@ def _run_case(
     repeats: int,
     warmup: int,
     coupled_2x2_mode: str,
+    potential_precompute_mode: str,
 ) -> tuple[BenchmarkResult, dict[str, dict[str, float]]]:
     timings: list[float] = []
     stage_runs: list[dict[str, dict[str, float | int]]] = []
@@ -149,6 +150,7 @@ def _run_case(
         backend=backend,
         profile_stages=True,
         coupled_2x2_mode=coupled_2x2_mode,
+        potential_precompute_mode=potential_precompute_mode,
     )
 
     for run_idx in range(warmup + repeats):
@@ -198,6 +200,7 @@ def _parity_check(
     dt: float,
     *,
     coupled_2x2_mode: str,
+    potential_precompute_mode: str,
 ) -> dict[str, float] | None:
     if not pt.has_cupy():
         return None
@@ -215,6 +218,7 @@ def _parity_check(
         options=pt.PropagationOptions(
             backend="numpy",
             coupled_2x2_mode=coupled_2x2_mode,
+            potential_precompute_mode=potential_precompute_mode,
         ),
     )
     psi_cp.propagate(
@@ -224,6 +228,7 @@ def _parity_check(
         options=pt.PropagationOptions(
             backend="cupy",
             coupled_2x2_mode=coupled_2x2_mode,
+            potential_precompute_mode=potential_precompute_mode,
         ),
     )
 
@@ -301,6 +306,12 @@ def main() -> int:
         default="auto",
         help="Potential-step strategy for 2x2 coupled systems",
     )
+    parser.add_argument(
+        "--potential-precompute-mode",
+        choices=("off", "auto"),
+        default="off",
+        help="Time-affine potential precompute strategy",
+    )
     args = parser.parse_args()
 
     if args.repeats < 1:
@@ -329,6 +340,7 @@ def main() -> int:
                     repeats=args.repeats,
                     warmup=args.warmup,
                     coupled_2x2_mode=args.coupled_2x2_mode,
+                    potential_precompute_mode=args.potential_precompute_mode,
                 )
                 results.append(result)
                 stage_breakdown.append(
@@ -339,6 +351,7 @@ def main() -> int:
                         "steps": args.steps,
                         "dt": args.dt,
                         "coupled_2x2_mode": args.coupled_2x2_mode,
+                        "potential_precompute_mode": args.potential_precompute_mode,
                         "stages": stages,
                         "profiled_stage_seconds_total": float(
                             sum(stage["mean_seconds"] for stage in stages.values())
@@ -350,6 +363,7 @@ def main() -> int:
         "metadata": _collect_metadata(),
         "config": {
             "coupled_2x2_mode": args.coupled_2x2_mode,
+            "potential_precompute_mode": args.potential_precompute_mode,
         },
         "results": [asdict(r) for r in results],
         "stage_breakdown": stage_breakdown,
@@ -358,11 +372,13 @@ def main() -> int:
             steps=max(8, args.steps // 2),
             dt=args.dt,
             coupled_2x2_mode=args.coupled_2x2_mode,
+            potential_precompute_mode=args.potential_precompute_mode,
         ),
     }
 
     print("Backend benchmark results:")
     print(f"- coupled 2x2 mode: {args.coupled_2x2_mode}")
+    print(f"- potential precompute mode: {args.potential_precompute_mode}")
     for r in results:
         print(
             f"- {r.backend:>5} | {r.workload:>9} | n={r.size:>4}: "
