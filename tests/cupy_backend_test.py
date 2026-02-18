@@ -170,3 +170,60 @@ def test_cupy_analytic_2x2_matches_eigh_reference():
         rtol=5e-5,
         atol=5e-7,
     )
+
+
+def test_cupy_complex64_mode_matches_complex128_reference():
+    grid = g1(96, -4, 4)
+    initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]
+    potential = pt.HermitianPotential.from_lower_triangular(
+        [
+            "0.2*x**2 + 0.1*t",
+            "0.03*cos(x) + 0.02*sin(t)",
+            "0.1*x**2 - 0.05*t",
+        ]
+    )
+
+    psi64 = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="cupy")
+    psi128 = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="cupy")
+
+    steps = 10
+    dt = 0.005
+
+    psi64.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(
+            backend="cupy",
+            dtype="complex64",
+            coupled_2x2_mode="auto",
+        ),
+    )
+    psi128.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(
+            backend="cupy",
+            dtype="complex128",
+            coupled_2x2_mode="auto",
+        ),
+    )
+
+    amp64 = _to_numpy(psi64.amp)
+    amp128 = _to_numpy(psi128.amp)
+
+    assert amp64.dtype == np.complex64
+
+    np.testing.assert_allclose(
+        np.abs(amp64) ** 2,
+        np.abs(amp128) ** 2,
+        rtol=2e-3,
+        atol=2e-5,
+    )
+    np.testing.assert_allclose(
+        _to_numpy(psi64.state_occupation()),
+        _to_numpy(psi128.state_occupation()),
+        rtol=2e-3,
+        atol=2e-5,
+    )

@@ -51,12 +51,14 @@ class Engine(ABC):
     ) -> None:
         """Apply kinetic split-step phase in reciprocal space in-place."""
         kx, ky, kz = kmesh
-        phase = self.xp.exp(-1j * alpha * dt * (kx**2 + ky**2 + kz**2))
+        imag_unit = self.xp.asarray(1j, dtype=amp.dtype)
+        phase = self.xp.exp(-imag_unit * alpha * dt * (kx**2 + ky**2 + kz**2))
         amp *= phase[..., self.xp.newaxis]
 
     def apply_diagonal_phase(self, amp: Any, *, diagonal: Any, dt: float) -> None:
         """Apply diagonal potential phase in-place."""
-        amp *= self.xp.exp(-1j * diagonal * dt)
+        imag_unit = self.xp.asarray(1j, dtype=amp.dtype)
+        amp *= self.xp.exp(-imag_unit * diagonal * dt)
 
     def apply_coupled_phase(
         self,
@@ -70,7 +72,8 @@ class Engine(ABC):
         # psi' = U @ diag(exp(-i*lambda*dt)) @ U† @ psi
         u_dag = self.xp.swapaxes(self.xp.conjugate(eigvecs), -1, -2)
         tmp = self.xp.matmul(u_dag, amp[..., self.xp.newaxis])[..., 0]
-        tmp *= self.xp.exp(-1j * eigvals * dt)
+        imag_unit = self.xp.asarray(1j, dtype=amp.dtype)
+        tmp *= self.xp.exp(-imag_unit * eigvals * dt)
         amp[...] = self.xp.matmul(eigvecs, tmp[..., self.xp.newaxis])[..., 0]
 
     def apply_coupled_phase_2x2(self, amp: Any, *, matrix: Any, dt: float) -> None:
@@ -92,18 +95,21 @@ class Engine(ABC):
         z = 0.5 * (a - d)
         r = xp.sqrt((z * xp.conjugate(z)).real + (b * xp.conjugate(b)).real)
 
-        phase = xp.exp(-1j * c * dt)
-        cos_term = xp.cos(r * dt)
+        imag_unit = xp.asarray(1j, dtype=amp.dtype)
+        dt_scalar = xp.asarray(dt, dtype=r.dtype)
 
-        eps = 1e-15
-        safe_r = xp.where(r > eps, r, 1.0)
-        sin_over_r = xp.sin(r * dt) / safe_r
-        sin_over_r = xp.where(r > eps, sin_over_r, dt)
+        phase = xp.exp(-imag_unit * c * dt_scalar)
+        cos_term = xp.cos(r * dt_scalar)
 
-        u00 = cos_term - 1j * sin_over_r * z
-        u11 = cos_term + 1j * sin_over_r * z
-        u01 = -1j * sin_over_r * b
-        u10 = -1j * sin_over_r * xp.conjugate(b)
+        eps = xp.asarray(1e-15, dtype=r.dtype)
+        safe_r = xp.where(r > eps, r, xp.asarray(1.0, dtype=r.dtype))
+        sin_over_r = xp.sin(r * dt_scalar) / safe_r
+        sin_over_r = xp.where(r > eps, sin_over_r, dt_scalar)
+
+        u00 = cos_term - imag_unit * sin_over_r * z
+        u11 = cos_term + imag_unit * sin_over_r * z
+        u01 = -imag_unit * sin_over_r * b
+        u10 = -imag_unit * sin_over_r * xp.conjugate(b)
 
         psi0 = amp[..., 0]
         psi1 = amp[..., 1]

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import time
 
 import numexpr as ne
+import numpy as np
 
 from pytalises.engine import ExpressionEvaluator
 from pytalises.options import PropagationOptions
@@ -87,6 +88,25 @@ class Propagator:
         self._engine.set_num_threads(self.options.threads)
         self._evaluator = ExpressionEvaluator(backend_name=self._backend.name)
 
+        self._complex_dtype = self.options.dtype
+        self._real_dtype = "float32" if self._complex_dtype == "complex64" else "float64"
+        self._alpha = (
+            float(np.float32(self.psi.alpha))
+            if self._complex_dtype == "complex64"
+            else float(self.psi.alpha)
+        )
+
+        if str(self.psi._amp.dtype) != self._complex_dtype:
+            self.psi._amp = self._engine.asarray(self.psi._amp, dtype=self._complex_dtype)
+            for i in range(self.psi.num_int_dim):
+                self.psi.default_var_dict[f"psi{i}"] = self.psi._amp[:, :, :, i]
+
+        self._kmesh = (
+            self._engine.asarray(self.psi.kmesh[0], dtype=self._real_dtype),
+            self._engine.asarray(self.psi.kmesh[1], dtype=self._real_dtype),
+            self._engine.asarray(self.psi.kmesh[2], dtype=self._real_dtype),
+        )
+
         self._profile_stages = bool(self.options.profile_stages)
         self._stage_seconds: dict[str, float] = defaultdict(float)
         self._stage_calls: dict[str, int] = defaultdict(int)
@@ -108,19 +128,19 @@ class Propagator:
 
         self.V_eval_array = self._engine.zeros(
             psi.number_of_grid_points + (psi.num_int_dim, psi.num_int_dim),
-            dtype="complex128",
+            dtype=self._complex_dtype,
         )
         self.V_eval_diag_array = self._engine.zeros(
             psi.number_of_grid_points + (psi.num_int_dim,),
-            dtype="complex128",
+            dtype=self._complex_dtype,
         )
         self.V_eval_eigval_array = self._engine.zeros(
             psi.number_of_grid_points + (psi.num_int_dim,),
-            dtype="complex128",
+            dtype=self._complex_dtype,
         )
         self.V_eval_eigvec_array = self._engine.zeros(
             psi.number_of_grid_points + (psi.num_int_dim, psi.num_int_dim),
-            dtype="complex128",
+            dtype=self._complex_dtype,
         )
 
         self.psi.construct_FFT(self.options.threads, self.options.fftw_flags)
@@ -223,8 +243,8 @@ class Propagator:
         self.psi.fft()
         self._engine.apply_kinetic_phase(
             self.psi._amp,
-            kmesh=(self.psi.kmesh[0], self.psi.kmesh[1], self.psi.kmesh[2]),
-            alpha=self.psi.alpha,
+            kmesh=self._kmesh,
+            alpha=self._alpha,
             dt=dt,
         )
         self.psi.ifft()

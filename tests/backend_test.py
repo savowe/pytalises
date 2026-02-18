@@ -67,6 +67,11 @@ def test_coupled_2x2_mode_rejects_invalid_value():
         pt.PropagationOptions(coupled_2x2_mode="invalid")
 
 
+def test_dtype_rejects_invalid_value():
+    with pytest.raises(ValueError, match="PropagationOptions.dtype"):
+        pt.PropagationOptions(dtype="float64")
+
+
 def test_analytic_2x2_path_matches_eigh_reference_numpy():
     grid = pt.Grid(shape=(64,), extent=((-3, 3),))
     initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]
@@ -108,4 +113,58 @@ def test_analytic_2x2_path_matches_eigh_reference_numpy():
         np.asarray(psi_eigh.state_occupation()),
         rtol=1e-10,
         atol=1e-12,
+    )
+
+
+def test_complex64_mode_matches_complex128_reference_numpy():
+    grid = pt.Grid(shape=(64,), extent=((-3, 3),))
+    initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]
+    potential = pt.HermitianPotential.from_lower_triangular(
+        [
+            "0.2*x**2 + 0.1*t",
+            "0.03*cos(x) + 0.02*sin(t)",
+            "0.1*x**2 - 0.05*t",
+        ]
+    )
+
+    psi64 = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="numpy")
+    psi128 = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="numpy")
+
+    steps = 16
+    dt = 0.005
+
+    psi64.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(
+            backend="numpy",
+            dtype="complex64",
+            coupled_2x2_mode="auto",
+        ),
+    )
+    psi128.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(
+            backend="numpy",
+            dtype="complex128",
+            coupled_2x2_mode="auto",
+        ),
+    )
+
+    assert np.asarray(psi64.amp).dtype == np.complex64
+
+    np.testing.assert_allclose(
+        np.abs(np.asarray(psi64.amp)) ** 2,
+        np.abs(np.asarray(psi128.amp)) ** 2,
+        rtol=5e-4,
+        atol=5e-6,
+    )
+    np.testing.assert_allclose(
+        np.asarray(psi64.state_occupation()),
+        np.asarray(psi128.state_occupation()),
+        rtol=5e-4,
+        atol=5e-6,
     )

@@ -73,6 +73,8 @@ def test_stage_breakdown_is_emitted_in_json(monkeypatch, tmp_path):
             "free",
             "--coupled-2x2-mode",
             "eigh",
+            "--dtype",
+            "complex64",
             "--json-out",
             str(json_out),
         ],
@@ -82,6 +84,7 @@ def test_stage_breakdown_is_emitted_in_json(monkeypatch, tmp_path):
 
     payload = json.loads(json_out.read_text(encoding="utf-8"))
     assert payload["config"]["coupled_2x2_mode"] == "eigh"
+    assert payload["config"]["dtype"] == "complex64"
 
     breakdown = payload.get("stage_breakdown")
     assert isinstance(breakdown, list)
@@ -91,5 +94,6 @@ def test_stage_breakdown_is_emitted_in_json(monkeypatch, tmp_path):
     assert entry["backend"] == "numpy"
     assert entry["workload"] == "free"
     assert entry["coupled_2x2_mode"] == "eigh"
+    assert entry["dtype"] == "complex64"
     assert "kinetic_prop" in entry["stages"]
     assert entry["stages"]["kinetic_prop"]["mean_seconds"] >= 0.0
