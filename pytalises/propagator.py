@@ -212,6 +212,7 @@ class Propagator:
                 self.psi._amp,
                 matrix=self.V_eval_array,
                 dt=dt,
+                kernel=self.options.coupled_2x2_kernel,
             )
             self._stop_stage_timer("apply_coupled_phase_analytic_2x2", t0)
             return

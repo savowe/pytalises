@@ -67,6 +67,11 @@ def test_coupled_2x2_mode_rejects_invalid_value():
         pt.PropagationOptions(coupled_2x2_mode="invalid")
 
 
+def test_coupled_2x2_kernel_rejects_invalid_value():
+    with pytest.raises(ValueError, match="coupled_2x2_kernel"):
+        pt.PropagationOptions(coupled_2x2_kernel="invalid")
+
+
 def test_dtype_rejects_invalid_value():
     with pytest.raises(ValueError, match="PropagationOptions.dtype"):
         pt.PropagationOptions(dtype="float64")

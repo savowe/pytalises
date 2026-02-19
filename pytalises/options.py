@@ -25,6 +25,7 @@ class PropagationOptions:
     )
     profile_stages: bool = False
     coupled_2x2_mode: str = "auto"
+    coupled_2x2_kernel: str = "vectorized"
 
     def __post_init__(self) -> None:
         if self.threads < 1:
@@ -36,4 +37,9 @@ class PropagationOptions:
         if self.coupled_2x2_mode not in {"auto", "eigh"}:
             raise ValueError(
                 "PropagationOptions.coupled_2x2_mode must be one of: 'auto', 'eigh'"
+            )
+        if self.coupled_2x2_kernel not in {"vectorized", "fused"}:
+            raise ValueError(
+                "PropagationOptions.coupled_2x2_kernel must be one of: "
+                "'vectorized', 'fused'"
             )

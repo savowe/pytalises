@@ -76,7 +76,14 @@ class Engine(ABC):
         tmp *= self.xp.exp(-imag_unit * eigvals * dt)
         amp[...] = self.xp.matmul(eigvecs, tmp[..., self.xp.newaxis])[..., 0]
 
-    def apply_coupled_phase_2x2(self, amp: Any, *, matrix: Any, dt: float) -> None:
+    def apply_coupled_phase_2x2(
+        self,
+        amp: Any,
+        *,
+        matrix: Any,
+        dt: float,
+        kernel: str = "vectorized",
+    ) -> None:
         """Apply non-diagonal potential step for 2x2 Hermitian matrices.
 
         Uses the closed-form matrix exponential of a Hermitian 2x2 block:
@@ -84,6 +91,11 @@ class Engine(ABC):
         """
         if amp.shape[-1] != 2 or matrix.shape[-2:] != (2, 2):
             raise ValueError("apply_coupled_phase_2x2 requires 2x2 coupled amplitudes")
+        if kernel not in {"vectorized", "fused"}:
+            raise ValueError(
+                "apply_coupled_phase_2x2 kernel must be 'vectorized' or 'fused'"
+            )
+        # Base implementation is the vectorized path used by NumPy and as fallback.
 
         xp = self.xp
 

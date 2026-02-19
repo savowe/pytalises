@@ -172,6 +172,60 @@ def test_cupy_analytic_2x2_matches_eigh_reference():
     )
 
 
+def test_cupy_fused_analytic_2x2_matches_vectorized_reference():
+    grid = g1(96, -4, 4)
+    initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]
+    potential = pt.HermitianPotential.from_lower_triangular(
+        [
+            "0.2*x**2 + 0.1*t",
+            "0.03*cos(x) + 0.02*sin(t)",
+            "0.1*x**2 - 0.05*t",
+        ]
+    )
+
+    psi_vec = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="cupy")
+    psi_fused = pt.Wavefunction(initial, grid, normalize_const=1.0, backend="cupy")
+
+    steps = 10
+    dt = 0.005
+    psi_vec.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(
+            backend="cupy",
+            coupled_2x2_mode="auto",
+            coupled_2x2_kernel="vectorized",
+        ),
+    )
+    psi_fused.propagate(
+        potential=potential,
+        steps=steps,
+        dt=dt,
+        options=pt.PropagationOptions(
+            backend="cupy",
+            coupled_2x2_mode="auto",
+            coupled_2x2_kernel="fused",
+        ),
+    )
+
+    amp_vec = _to_numpy(psi_vec.amp)
+    amp_fused = _to_numpy(psi_fused.amp)
+
+    np.testing.assert_allclose(
+        np.abs(amp_fused) ** 2,
+        np.abs(amp_vec) ** 2,
+        rtol=5e-5,
+        atol=5e-7,
+    )
+    np.testing.assert_allclose(
+        _to_numpy(psi_fused.state_occupation()),
+        _to_numpy(psi_vec.state_occupation()),
+        rtol=5e-5,
+        atol=5e-7,
+    )
+
+
 def test_cupy_complex64_mode_matches_complex128_reference():
     grid = g1(96, -4, 4)
     initial = ["exp(-x**2)", "0.2*exp(-(x-0.5)**2)"]

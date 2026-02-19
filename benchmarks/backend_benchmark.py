@@ -142,6 +142,7 @@ def _run_case(
     repeats: int,
     warmup: int,
     coupled_2x2_mode: str,
+    coupled_2x2_kernel: str,
     dtype: str,
 ) -> tuple[BenchmarkResult, dict[str, dict[str, float]]]:
     timings: list[float] = []
@@ -150,6 +151,7 @@ def _run_case(
         backend=backend,
         profile_stages=True,
         coupled_2x2_mode=coupled_2x2_mode,
+        coupled_2x2_kernel=coupled_2x2_kernel,
         dtype=dtype,
     )
 
@@ -200,6 +202,7 @@ def _parity_check(
     dt: float,
     *,
     coupled_2x2_mode: str,
+    coupled_2x2_kernel: str,
     dtype: str,
 ) -> dict[str, float] | None:
     if not pt.has_cupy():
@@ -218,6 +221,7 @@ def _parity_check(
         options=pt.PropagationOptions(
             backend="numpy",
             coupled_2x2_mode=coupled_2x2_mode,
+            coupled_2x2_kernel=coupled_2x2_kernel,
             dtype=dtype,
         ),
     )
@@ -228,6 +232,7 @@ def _parity_check(
         options=pt.PropagationOptions(
             backend="cupy",
             coupled_2x2_mode=coupled_2x2_mode,
+            coupled_2x2_kernel=coupled_2x2_kernel,
             dtype=dtype,
         ),
     )
@@ -307,6 +312,12 @@ def main() -> int:
         help="Potential-step strategy for 2x2 coupled systems",
     )
     parser.add_argument(
+        "--coupled-2x2-kernel",
+        choices=("vectorized", "fused"),
+        default="vectorized",
+        help="Analytic 2x2 kernel implementation mode",
+    )
+    parser.add_argument(
         "--dtype",
         choices=("complex128", "complex64"),
         default="complex128",
@@ -340,6 +351,7 @@ def main() -> int:
                     repeats=args.repeats,
                     warmup=args.warmup,
                     coupled_2x2_mode=args.coupled_2x2_mode,
+                    coupled_2x2_kernel=args.coupled_2x2_kernel,
                     dtype=args.dtype,
                 )
                 results.append(result)
@@ -351,6 +363,7 @@ def main() -> int:
                         "steps": args.steps,
                         "dt": args.dt,
                         "coupled_2x2_mode": args.coupled_2x2_mode,
+                        "coupled_2x2_kernel": args.coupled_2x2_kernel,
                         "dtype": args.dtype,
                         "stages": stages,
                         "profiled_stage_seconds_total": float(
@@ -363,6 +376,7 @@ def main() -> int:
         "metadata": _collect_metadata(),
         "config": {
             "coupled_2x2_mode": args.coupled_2x2_mode,
+            "coupled_2x2_kernel": args.coupled_2x2_kernel,
             "dtype": args.dtype,
         },
         "results": [asdict(r) for r in results],
@@ -372,12 +386,14 @@ def main() -> int:
             steps=max(8, args.steps // 2),
             dt=args.dt,
             coupled_2x2_mode=args.coupled_2x2_mode,
+            coupled_2x2_kernel=args.coupled_2x2_kernel,
             dtype=args.dtype,
         ),
     }
 
     print("Backend benchmark results:")
     print(f"- coupled 2x2 mode: {args.coupled_2x2_mode}")
+    print(f"- coupled 2x2 kernel: {args.coupled_2x2_kernel}")
     print(f"- dtype: {args.dtype}")
     for r in results:
         print(
