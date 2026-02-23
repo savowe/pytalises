@@ -13,9 +13,9 @@ import pytalises as pt
 # Create wavefunction - 2D Gaussian with momentum
 psi = pt.legacy.Wavefunction(
     "exp(-((x-x0)/sigmax)**2)*exp(-((y-y0)/sigmay)**2)*exp(1j*ky*y)", 
-    variables={'x0': 0, 'y0': -3, 'sigmax': 5, 'sigmay': 1, 'ky': 3},
-    number_of_grid_points=(128, 256),
-    spatial_ext=[(-10, 10), (-10, 10)],
+    variables={'x0': 0, 'y0': -6, 'sigmax': 4, 'sigmay': 1, 'ky': 4},
+    number_of_grid_points=(128, 320),
+    spatial_ext=[(-10, 10), (-12, 12)],
 )
 
 # Periodic grating potential
@@ -32,7 +32,7 @@ data = (np.abs(psi.amp**2) + potential * 0.0001).T
 im = ax.imshow(
     data,
     origin='lower',
-    extent=[-10, 10, -10, 10],
+    extent=[-10, 10, -12, 12],
     vmax=np.max(np.abs(psi.amp**2)),
     cmap='inferno',
     aspect='equal',
@@ -49,7 +49,7 @@ grating_vis = np.where(potential > 0, 0.3, 0)
 ax.imshow(
     grating_vis.T,
     origin='lower',
-    extent=[-10, 10, -10, 10],
+    extent=[-10, 10, -12, 12],
     cmap='Greys',
     alpha=0.5,
     aspect='equal',
@@ -60,9 +60,9 @@ ax.set_title('Diffraction on periodic grating', color='#c9d1d9', fontsize=12, pa
 frames_data = []
 
 # Pre-compute frames
-n_frames = 150
+n_frames = 200
 for i in range(n_frames):
-    psi.propagate(v, num_time_steps=4, delta_t=0.002, diag=True)
+    psi.propagate(v, num_time_steps=6, delta_t=0.003, diag=True)
     frame = (np.abs(psi.amp**2) + potential * 0.00005).T.copy()
     frames_data.append(frame)
     if i % 30 == 0:
