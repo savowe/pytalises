@@ -50,11 +50,11 @@ pip install pytalises[gpu]
 
 pyTALISES excels at **position-space wavefunction dynamics**:
 
-- 🌊 **Matter-wave propagation** — free expansion, wavepacket dynamics
-- 🔬 **Atom optics** — Bragg diffraction, beam splitters, interferometry
-- ⚛️ **Cold atom physics** — BEC dynamics, nonlinear interactions
-- 📡 **Light-matter coupling** — Rabi oscillations, Raman transitions
-- 🎯 **Multi-level systems** — arbitrary internal state structure
+- **Matter-wave propagation** — free expansion, wavepacket dynamics
+- **Atom optics** — Bragg diffraction, beam splitters, interferometry
+- **Cold atom physics** — BEC dynamics, nonlinear interactions
+- **Light-matter coupling** — Rabi oscillations, Raman transitions
+- **Multi-level systems** — arbitrary internal state structure
 
 If you need to propagate wavefunctions on spatial grids with time-dependent potentials, pyTALISES makes it simple.
 
@@ -121,7 +121,7 @@ See the [GPU documentation](https://pytalises.readthedocs.io/en/latest/gpu_backe
 
 ## Documentation
 
-📖 **[Full documentation](https://pytalises.readthedocs.io/)**
+**[Full documentation](https://pytalises.readthedocs.io/)**
 
 Includes:
 - [Usage examples](https://pytalises.readthedocs.io/en/latest/examples.html) — Gaussian wavepackets, harmonic potentials, BEC
