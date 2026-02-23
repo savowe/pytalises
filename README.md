@@ -1,112 +1,155 @@
-[![Downloads](https://img.shields.io/conda/dn/conda-forge/pytalises)](https://pypi.org/project/pytalises/)
 [![PyPI](https://img.shields.io/pypi/v/pytalises?color=blue)](https://pypi.org/project/pytalises/)
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/pytalises?color=blue&label=conda-forge)](https://anaconda.org/conda-forge/pytalises)
+[![Downloads](https://img.shields.io/conda/dn/conda-forge/pytalises)](https://pypi.org/project/pytalises/)
 [![CI Status](https://github.com/savowe/pytalises/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/savowe/pytalises/actions/workflows/ci.yml)
-[![Release Status](https://github.com/savowe/pytalises/actions/workflows/python-publish.yml/badge.svg?branch=master)](https://github.com/savowe/pytalises/actions/workflows/python-publish.yml)
-[![Documentation Status](https://readthedocs.org/projects/pytalises/badge/?version=latest)](https://pytalises.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://readthedocs.org/projects/pytalises/badge/?version=latest)](https://pytalises.readthedocs.io/en/latest/)
+![GPU Support](https://img.shields.io/badge/GPU-CuPy-green)
 
-![additional_examples_54_0](https://user-images.githubusercontent.com/38558793/119370320-713f2c00-bcb5-11eb-94e5-cc801abcd7d8.png)
+<div align="center">
 
 # pyTALISES
 
-**pyTALISES** (This Ain't a LInear Schrödinger Equation Solver) is an easy-to-use Python implementation of the Split-Step Fourier Method, for numeric calculation of a wave function's time-propagation under the Schrödinger equation.
+**This Ain't a LInear Schrödinger Equation Solver**
 
-### Features
-- Calculation of a wavefunction's time propagation under a (non)linear Schrödinger equation: ![](https://latex.codecogs.com/png.latex?%5Cdpi%7B120%7D%20i%5Chbar%20%5Cfrac%7B%5Cpartial%7D%7B%5Cpartial%20t%7D%20%5CPsi%20%28%5Cvec%7Br%7D%2C%20t%29%20%3D%20%5CBig%5BV%28%5CPsi%2C%5Cvec%7Br%7D%2C%20t%29%20&plus;%20%5Cfrac%7B%5Chbar%5E2%7D%7B2m%7D%5Cnabla%5E2%20%5CBig%5D%20%5CPsi%20%28%5Cvec%7Br%7D%2C%20t%29)
-- the wave-function ![](https://latex.codecogs.com/gif.latex?%5Cdpi%7B100%7D%20%5CPsi) may include an arbitrary number of internal and external degrees of freedom
-- simple implementation of Hamiltonians
-- speed of the [FFTW](https://pypi.org/project/pyFFTW/), [BLAS](https://www.netlib.org/blas/) and [numexpr](https://numexpr.readthedocs.io/en/latest/) libraries with multithreading
-- crucial functions are just-in-time compiled with [numba](https://numba.readthedocs.io/en/stable/)
+*Split-step Fourier method for quantum wavefunction propagation*
 
-### v2 API Quickstart
+![Diffraction on periodic grating](docs/assets/diffraction_grating.gif)
+
+</div>
+
+## Quickstart
+
+```python
+import pytalises as pt
+
+# Define a 1D grid
+grid = pt.Grid(shape=(256,), extent=((-10, 10),))
+
+# Create a Gaussian wavepacket
+psi = pt.Wavefunction(initial="exp(-x**2)", grid=grid)
+
+# Propagate freely for 1000 steps
+psi.freely_propagate(steps=1000, dt=1e-4)
+```
+
+That's it. For coupled states, potentials, and GPU acceleration, see the [documentation](https://pytalises.readthedocs.io/).
+
+## Installation
+
+**pip**:
+```bash
+pip install pytalises
+```
+
+**With GPU support** (requires NVIDIA CUDA):
+```bash
+pip install pytalises[gpu]
+```
+
+## Why pyTALISES?
+
+| Feature | pyTALISES | QuTiP |
+|---------|-----------|-------|
+| Split-step Fourier | ✅ Native | ❌ |
+| Arbitrary internal states | ✅ | ✅ |
+| GPU acceleration | ✅ CuPy | ❌ |
+| Time-dependent potentials | ✅ String expressions | ✅ |
+| Learning curve | Easy | Medium |
+
+pyTALISES is designed for **position-space wavefunction dynamics** — BEC simulations, atom interferometry, matter-wave diffraction. If you need density matrices or open quantum systems, QuTiP is better suited.
+
+## Features
+
+- **Multi-dimensional grids** — 1D, 2D, 3D spatial simulations
+- **Coupled internal states** — Two-level systems, Raman transitions, Bragg diffraction
+- **String-based potentials** — Define V(x,t) as human-readable expressions
+- **Performance** — FFTW, numba JIT, numexpr, multithreading
+- **GPU acceleration** — Optional CuPy backend for large grids
+
+## Examples
+
+<details>
+<summary><strong>Two-level Rabi oscillations</strong></summary>
 
 ```python
 import pytalises as pt
 
 grid = pt.Grid(shape=(256,), extent=((-4, 4),))
-backend = "cupy" if pt.has_cupy() else "numpy"
-
 psi = pt.Wavefunction(
-    initial=["exp(-x**2)", "0"],
+    initial=["exp(-x**2)", "0"],  # Start in ground state
     grid=grid,
-    backend=backend,
 )
 
+# Coupling potential (off-diagonal drives transitions)
 V = pt.HermitianPotential.from_lower_triangular([
-    "0",
-    "Omega*cos(t)",
-    "Delta",
+    "0",              # V_11: ground state energy
+    "Omega*cos(t)",   # V_21: coupling
+    "Delta",          # V_22: excited state detuning
 ])
 
 psi.propagate(
     potential=V,
     steps=1000,
     dt=1e-6,
-    variables={"Omega": 2.0, "Delta": 1.0},
-    options=pt.PropagationOptions(backend=backend, threads=4),
+    variables={"Omega": 2.0, "Delta": 0.0},
 )
 ```
 
-For migration details from the pre-v2 API, see `docs/source/v2_migration.rst`.
-CuPy support is optional and requires an NVIDIA CUDA environment.
+</details>
 
-Note: backend/engine internals are intentionally private and may change.
-The stable public surface is `Grid`, `Wavefunction`, propagation functions,
-and structured potential/options APIs.
+<details>
+<summary><strong>GPU-accelerated propagation</strong></summary>
 
-### Backend accuracy and performance checks
+```python
+import pytalises as pt
 
-- Backend parity checks are covered by:
-  - `tests/backend_parity_test.py` (generic non-NumPy backends vs NumPy reference)
-  - `tests/cupy_backend_test.py` (CuPy-focused coverage)
-- Local benchmark utility:
+# Auto-detects GPU if available
+psi.propagate(
+    potential=V,
+    steps=10000,
+    dt=1e-6,
+    options=pt.PropagationOptions(backend="auto"),
+)
+
+# Or explicitly:
+options = pt.PropagationOptions(backend="cupy", dtype="complex128")
+```
+
+See the [GPU documentation](https://pytalises.readthedocs.io/en/latest/gpu_backend.html) for performance characteristics.
+
+</details>
+
+## Documentation
+
+📖 **[Full documentation](https://pytalises.readthedocs.io/)**
+
+Includes:
+- [Usage examples](https://pytalises.readthedocs.io/en/latest/examples.html) — Gaussian wavepackets, harmonic potentials, BEC
+- [Advanced examples](https://pytalises.readthedocs.io/en/latest/additional_examples.html) — Raman transitions, Bragg diffraction, atom interferometry
+- [GPU backend guide](https://pytalises.readthedocs.io/en/latest/gpu_backend.html) — Installation, performance, troubleshooting
+- [Algorithm notes](https://pytalises.readthedocs.io/en/latest/notes.html) — Split-step Fourier method explained
+
+## Development
 
 ```bash
-python benchmarks/backend_benchmark.py --sizes 128,192 --workloads free,potential --steps 25 --repeats 3
+git clone https://github.com/savowe/pytalises.git
+cd pytalises
+pip install -e ".[dev]"
+pytest tests/
 ```
 
-This prints backend timings for multiple workloads/sizes, NumPy/CuPy speedups, host metadata, and parity metrics.
+## Citation
 
-### Documentation
-Read the [documentation](https://pytalises.readthedocs.io/en/latest/) to learn more about pytalises' capabilities.
-The documentation features many examples, among others
-[2D harmonic potentials](https://pytalises.readthedocs.io/en/latest/examples.html#2D-harmonic-potential), 
-[BEC scattering](https://pytalises.readthedocs.io/en/latest/examples.html#Nonlinear-interactions-between-internal-states), 
-[three-level Raman transitions](https://pytalises.readthedocs.io/en/latest/additional_examples.html#Three-level-Raman-transitions), 
-[single-Bragg diffraction](https://pytalises.readthedocs.io/en/latest/additional_examples.html#Single-Bragg-diffraction) 
-and
-[atom interferometry](https://pytalises.readthedocs.io/en/latest/additional_examples.html#Light-pulse-atom-interferometry-with-single-Bragg-diffraction).
+If you use pyTALISES in academic work, please cite:
 
-
-
-Installing pytalises
-====================
-**We recommend installing pytalises via conda**
-
-pytalises supports Python 3.9 through 3.13, and wheels are built and tested across those versions in CI.
-
-
-#### Using conda
-
-Installing `pytalises` from the `conda-forge` channel can be achieved by adding `conda-forge` to your channels with:
-
-```
-conda config --add channels conda-forge
+```bibtex
+@software{pytalises,
+  author = {Vowe, Sascha},
+  title = {pyTALISES: Split-Step Fourier Method for the Schrödinger Equation},
+  url = {https://github.com/savowe/pytalises},
+}
 ```
 
-Once the `conda-forge` channel has been enabled, `pytalises` can be installed with:
+## License
 
-```
-conda install pytalises
-```
-
-
-#### Using pip
-
-pytalises is available on the Python Package Index and can be installed via
-
-```
-pip install pytalises
-```
-
-it has dependencies via `scipy` and `numba` on BLAS and LAPACK libraries that are not always found on windows systems. For linux they can usually be located.
+GPLv3 — see [LICENSE](LICENSE).
