@@ -21,6 +21,7 @@ Welcome to pytalises's documentation!
    examples
    additional_examples
    notes
+   gpu_backend
    v2_migration
    pytalises.rst
 

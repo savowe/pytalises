@@ -37,6 +37,11 @@ dependencies = [
   "numexpr>=2.8.4",
 ]
 
+[project.optional-dependencies]
+gpu = [
+  "cupy-cuda12x>=13.0.0; platform_system=='Linux'",
+]
+
 [project.urls]
 Homepage = "http://github.com/savowe/pytalises"
 Repository = "http://github.com/savowe/pytalises"

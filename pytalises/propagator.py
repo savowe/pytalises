@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any
+import time
 
 import numexpr as ne
+import numpy as np
 
+from pytalises.engine import ExpressionEvaluator
 from pytalises.options import PropagationOptions
 from pytalises.potentials import BasePotential, zero_potential
 
@@ -80,25 +84,63 @@ class Propagator:
             )
 
         self._backend = self.psi._backend
-        self._backend.set_num_threads(self.options.threads)
+        self._engine = self.psi._engine
+        self._engine.set_num_threads(self.options.threads)
+        self._evaluator = ExpressionEvaluator(backend_name=self._backend.name)
+
+        self._complex_dtype = self.options.dtype
+        self._real_dtype = "float32" if self._complex_dtype == "complex64" else "float64"
+        self._alpha = (
+            float(np.float32(self.psi.alpha))
+            if self._complex_dtype == "complex64"
+            else float(self.psi.alpha)
+        )
+
+        if str(self.psi._amp.dtype) != self._complex_dtype:
+            self.psi._amp = self._engine.asarray(self.psi._amp, dtype=self._complex_dtype)
+            for i in range(self.psi.num_int_dim):
+                self.psi.default_var_dict[f"psi{i}"] = self.psi._amp[:, :, :, i]
+
+        self._kmesh = (
+            self._engine.asarray(self.psi.kmesh[0], dtype=self._real_dtype),
+            self._engine.asarray(self.psi.kmesh[1], dtype=self._real_dtype),
+            self._engine.asarray(self.psi.kmesh[2], dtype=self._real_dtype),
+        )
+
+        self._profile_stages = bool(self.options.profile_stages)
+        self._stage_seconds: dict[str, float] = defaultdict(float)
+        self._stage_calls: dict[str, int] = defaultdict(int)
 
         self.v = self.Potential.from_potential(
             potential=potential,
             variables=variables or {},
             num_int_dim=psi.num_int_dim,
         )
+        self._use_analytic_2x2 = (
+            self.options.coupled_2x2_mode == "auto"
+            and self.v.diag is False
+            and self.psi.num_int_dim == 2
+        )
 
         assert isinstance(psi, pytalises.wavefunction.Wavefunction)
         assert self.v.num_int_dim == self.psi.num_int_dim
         assert self.psi._amp.shape[-1] == self.psi.num_int_dim
 
-        self.V_eval_array = self._backend.zeros(
+        self.V_eval_array = self._engine.zeros(
             psi.number_of_grid_points + (psi.num_int_dim, psi.num_int_dim),
-            dtype="complex128",
+            dtype=self._complex_dtype,
         )
-        self.V_eval_eigval_array = self._backend.zeros(
+        self.V_eval_diag_array = self._engine.zeros(
             psi.number_of_grid_points + (psi.num_int_dim,),
-            dtype="complex128",
+            dtype=self._complex_dtype,
+        )
+        self.V_eval_eigval_array = self._engine.zeros(
+            psi.number_of_grid_points + (psi.num_int_dim,),
+            dtype=self._complex_dtype,
+        )
+        self.V_eval_eigvec_array = self._engine.zeros(
+            psi.number_of_grid_points + (psi.num_int_dim, psi.num_int_dim),
+            dtype=self._complex_dtype,
         )
 
         self.psi.construct_FFT(self.options.threads, self.options.fftw_flags)
@@ -113,88 +155,139 @@ class Propagator:
                 self.eval_diag_V()
             else:
                 self.eval_V()
-                self.V_eval_eigval_array, self.V_eval_array = self._backend.eigh(
-                    self.V_eval_array
-                )
+                if not self._use_analytic_2x2:
+                    self._refresh_eigendecomposition()
+
+    def _record_stage(self, name: str, elapsed: float) -> None:
+        if not self._profile_stages:
+            return
+        self._stage_seconds[name] += elapsed
+        self._stage_calls[name] += 1
+
+    def _start_stage_timer(self) -> float:
+        if not self._profile_stages:
+            return 0.0
+        self._engine.synchronize()
+        return time.perf_counter()
+
+    def _stop_stage_timer(self, name: str, start: float) -> None:
+        if not self._profile_stages:
+            return
+        self._engine.synchronize()
+        self._record_stage(name, time.perf_counter() - start)
+
+    def stage_timings(self) -> dict[str, dict[str, float | int]]:
+        """Return accumulated stage timings for this propagator instance."""
+        if not self._profile_stages:
+            return {}
+        return {
+            name: {
+                "seconds": float(self._stage_seconds[name]),
+                "calls": int(self._stage_calls[name]),
+            }
+            for name in sorted(self._stage_seconds)
+        }
 
     def potential_prop(self, dt: float) -> None:
         """Apply potential propagator step."""
         self.prop_method(dt)
 
+    def _refresh_eigendecomposition(self) -> None:
+        t0 = self._start_stage_timer()
+        eigvals, eigvecs = self._engine.eigendecompose_hermitian(self.V_eval_array)
+        self.V_eval_eigval_array[...] = eigvals
+        self.V_eval_eigvec_array[...] = eigvecs
+        self._stop_stage_timer("_refresh_eigendecomposition", t0)
+
     def nondiag_potential_prop(self, dt: float) -> None:
         """Apply potential step for non-diagonal potentials."""
         if self.v.static is False:
             self.eval_V()
-            self.V_eval_eigval_array, self.V_eval_array = self._backend.eigh(
-                self.V_eval_array
+            if not self._use_analytic_2x2:
+                self._refresh_eigendecomposition()
+
+        if self._use_analytic_2x2:
+            t0 = self._start_stage_timer()
+            self._engine.apply_coupled_phase_2x2(
+                self.psi._amp,
+                matrix=self.V_eval_array,
+                dt=dt,
+                kernel=self.options.coupled_2x2_kernel,
             )
-        self._backend.einsum(
-            "xyzij,xyzj,xyzkj,xyzk->xyzi",
-            self.V_eval_array,
-            self._backend.evaluate(
-                "exp(-1j*eigval*dt)",
-                local_dict={"eigval": self.V_eval_eigval_array, "dt": dt},
-            ),
-            self._backend.conjugate(self.V_eval_array),
+            self._stop_stage_timer("apply_coupled_phase_analytic_2x2", t0)
+            return
+
+        t0 = self._start_stage_timer()
+        self._engine.apply_coupled_phase(
             self.psi._amp,
-            out=self.psi._amp,
+            eigvals=self.V_eval_eigval_array,
+            eigvecs=self.V_eval_eigvec_array,
+            dt=dt,
         )
+        self._stop_stage_timer("apply_coupled_phase", t0)
 
     def diag_potential_prop(self, dt: float) -> None:
         """Apply potential step for diagonal potentials."""
         if self.v.static is False:
             self.eval_diag_V()
-        self._backend.einsum(
-            "xyzii,xyzi->xyzi",
-            self._backend.evaluate(
-                "exp(-1j*V*dt)",
-                local_dict={"V": self.V_eval_array, "dt": dt},
-            ),
+        t0 = self._start_stage_timer()
+        self._engine.apply_diagonal_phase(
             self.psi._amp,
-            out=self.psi._amp,
+            diagonal=self.V_eval_diag_array,
+            dt=dt,
         )
+        self._stop_stage_timer("apply_diagonal_phase", t0)
 
     def kinetic_prop(self, dt: float) -> None:
         """Perform kinetic propagation step in reciprocal space."""
+        t0 = self._start_stage_timer()
         self.psi.fft()
-        self._backend.einsum(
-            "xyz,xyzi->xyzi",
-            self._backend.evaluate(
-                "exp(-1j*alpha*dt*(kx**2+ky**2+kz**2))",
-                local_dict={
-                    "kx": self.psi.kmesh[0],
-                    "ky": self.psi.kmesh[1],
-                    "kz": self.psi.kmesh[2],
-                    "alpha": self.psi.alpha,
-                    "dt": dt,
-                },
-            ),
+        self._engine.apply_kinetic_phase(
             self.psi._amp,
-            out=self.psi._amp,
+            kmesh=self._kmesh,
+            alpha=self._alpha,
+            dt=dt,
         )
         self.psi.ifft()
         self.psi.t += dt
+        self._stop_stage_timer("kinetic_prop", t0)
+
+    def _evaluation_scope(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        local_scope = {**self.v.variables, **self.psi.default_var_dict}
+        global_scope = {"t": self.psi.t}
+        return local_scope, global_scope
 
     def eval_V(self) -> None:
         """Evaluate full potential matrix on the complete spatial grid."""
+        t0 = self._start_stage_timer()
+        self.V_eval_array[...] = 0
+
+        local_scope, global_scope = self._evaluation_scope()
         k = 0
         for i in range(self.psi.num_int_dim):
             for j in range(i, self.psi.num_int_dim):
-                self.V_eval_array[:, :, :, j, i] = self._backend.evaluate(
+                eval_ji = self._evaluator.eval(
                     self.v.potential_strings[k],
-                    local_dict={**self.v.variables, **self.psi.default_var_dict},
-                    global_dict={"t": self.psi.t},
+                    local_dict=local_scope,
+                    global_dict=global_scope,
                 )
+                self.V_eval_array[:, :, :, j, i] = eval_ji
+                if i != j:
+                    self.V_eval_array[:, :, :, i, j] = self._engine.xp.conjugate(eval_ji)
                 k += 1
+        self._stop_stage_timer("eval_V", t0)
 
     def eval_diag_V(self) -> None:
         """Evaluate diagonal potential matrix elements."""
+        t0 = self._start_stage_timer()
+        local_scope, global_scope = self._evaluation_scope()
         for i in range(self.psi.num_int_dim):
-            self.V_eval_array[:, :, :, i, i] = self._backend.evaluate(
+            self.V_eval_diag_array[:, :, :, i] = self._evaluator.eval(
                 self.v.potential_strings[i],
-                local_dict={**self.v.variables, **self.psi.default_var_dict},
-                global_dict={"t": self.psi.t},
+                local_dict=local_scope,
+                global_dict=global_scope,
             )
+        self._stop_stage_timer("eval_diag_V", t0)
 
     class Potential:
         """Simple container for potential metadata."""

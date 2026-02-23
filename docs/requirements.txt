@@ -1,4 +1,9 @@
--c ../requirements-constraints.txt
+# Sphinx and extensions
+sphinx>=7.0
+sphinx-rtd-theme>=2.0
 nbsphinx>=0.9.4
+pypandoc_binary>=1.13
+
+# For notebook rendering
 ipython>=8.12
 pygments>=2.10

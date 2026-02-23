@@ -11,6 +11,13 @@ _BACKENDS = {
     "numpy": NumpyBackend,
 }
 
+try:  # optional dependency
+    from .cupy_backend import CupyBackend
+except ImportError:  # pragma: no cover - depends on optional runtime
+    CupyBackend = None
+else:
+    _BACKENDS["cupy"] = CupyBackend
+
 _default_backend: Optional[Backend] = None
 
 
@@ -19,8 +26,26 @@ def register_backend(name: str, backend_class):
     _BACKENDS[name] = backend_class
 
 
+def available_backends() -> tuple[str, ...]:
+    """Return names of currently importable backends."""
+    return tuple(sorted(_BACKENDS.keys()))
+
+
+def has_cupy() -> bool:
+    """Return ``True`` if a usable CuPy backend is available."""
+    if "cupy" not in _BACKENDS:
+        return False
+    try:
+        import cupy as cp
+
+        return cp.cuda.runtime.getDeviceCount() > 0
+    except Exception:
+        return False
+
+
 def _auto_detect_backend() -> str:
-    # Future: GPU detection for CuPy/JAX backends.
+    if has_cupy():
+        return "cupy"
     return "numpy"
 
 
@@ -39,6 +64,12 @@ def get_backend(name: Union[str, Backend, None] = None, **kwargs) -> Backend:
     if name not in _BACKENDS:
         available = sorted(_BACKENDS.keys())
         raise ValueError(f"Unknown backend '{name}'. Available: {available}")
+
+    if name == "cupy" and not has_cupy():
+        raise ValueError(
+            "CuPy backend requested but no usable CUDA device is available. "
+            "Install CuPy with CUDA support and ensure at least one visible GPU."
+        )
 
     return _BACKENDS[name](**kwargs)
 

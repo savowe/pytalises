@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 import pytalises.propagator
 from pytalises.backends import get_backend
 from pytalises.backends.base import Backend
+from pytalises.engine import ExpressionEvaluator, create_engine
 from pytalises.grid import Grid
 from pytalises.options import PropagationOptions
 from pytalises.potentials import BasePotential
@@ -63,6 +64,8 @@ class Wavefunction:
             raise TypeError("variables must be dict")
 
         self._backend = get_backend(backend, num_threads=num_threads)
+        self._engine = create_engine(self._backend)
+        self._evaluator = ExpressionEvaluator(backend_name=self._backend.name)
 
         self.grid = grid
         self.initial = list(initial)
@@ -75,9 +78,9 @@ class Wavefunction:
         self.num_ext_dim = int(sum(self.axes))
         self.nX, self.nY, self.nZ = self.number_of_grid_points
 
-        r: list[NDArray[np.floating[Any]]] = []
+        r: list[Any] = []
         Delta_r: list[float] = []
-        k: list[NDArray[np.floating[Any]] | float] = []
+        k: list[Any] = []
         delta_k: list[float] = []
 
         for i, spatial_ext_tuple in enumerate(self.spatial_ext):
@@ -89,7 +92,9 @@ class Wavefunction:
             if self.axes[i] == 0:
                 Delta_r.append(np.nan)
                 delta_k.append(np.nan)
-                k.append(0.0)
+                # Keep inactive reciprocal axes as 1D arrays for backend parity
+                # (CuPy meshgrid requires array-like inputs, not Python scalars).
+                k.append(self._backend.asarray([0.0]))
             else:
                 drange = r_max - r_min
                 Delta_r.append(drange)
@@ -128,7 +133,7 @@ class Wavefunction:
 
         self.variables = variables
         for i in range(self.num_int_dim):
-            self._amp[:, :, :, i] = self._backend.evaluate(
+            self._amp[:, :, :, i] = self._evaluator.eval(
                 self.initial[i],
                 local_dict={**self.default_var_dict, **self.variables},
                 global_dict={"t": self.t},
@@ -148,10 +153,10 @@ class Wavefunction:
             "FFTW_DESTROY_INPUT",
         ),
     ) -> None:
-        """Construct FFT bindings through backend plan interface."""
+        """Construct FFT bindings through engine plan interface."""
         axes = tuple(i for i, active in enumerate(self.axes) if active)
-        self._backend.set_num_threads(num_threads)
-        self._fft_plan = self._backend.create_fft_plan(
+        self._engine.set_num_threads(num_threads)
+        self._fft_plan = self._engine.create_fft_plan(
             self._amp,
             axes=axes,
             num_threads=num_threads,
@@ -203,12 +208,13 @@ class Wavefunction:
         if not (0 <= axis < self.num_ext_dim):
             raise ValueError(f"axis must be in [0, {self.num_ext_dim - 1}]")
 
+        xp = self._engine.xp
         phys_axis = active_axes[axis]
         axes_to_trace = [0, 1, 2]
         axes_to_trace.pop(phys_axis)
-        psi_sq_amp = self._backend.power(self._backend.abs(self._amp), 2)
-        traced_out_psi = self._backend.sum(psi_sq_amp, axis=tuple(axes_to_trace))
-        exp_pos = self._backend.einsum("ri,r->", traced_out_psi, self._r[phys_axis])
+        psi_sq_amp = xp.abs(self._amp) ** 2
+        traced_out_psi = xp.sum(psi_sq_amp, axis=tuple(axes_to_trace))
+        exp_pos = xp.sum(traced_out_psi * self._r[phys_axis][:, xp.newaxis])
         exp_pos *= self._volume_element()
         return exp_pos
 
@@ -224,24 +230,26 @@ class Wavefunction:
         if not (0 <= axis < self.num_ext_dim):
             raise ValueError(f"axis must be in [0, {self.num_ext_dim - 1}]")
 
+        xp = self._engine.xp
         phys_axis = active_axes[axis]
         axes_to_trace = [0, 1, 2]
         axes_to_trace.pop(phys_axis)
-        psi_sq_amp = self._backend.power(self._backend.abs(self._amp), 2)
-        traced_out_psi = self._backend.sum(psi_sq_amp, axis=tuple(axes_to_trace))
-        var_pos = self._backend.einsum(
-            "ri,r->",
-            traced_out_psi,
-            (self._r[phys_axis] - self.exp_pos(axis)) ** 2,
-        )
+        psi_sq_amp = xp.abs(self._amp) ** 2
+        traced_out_psi = xp.sum(psi_sq_amp, axis=tuple(axes_to_trace))
+        variance_axis = (self._r[phys_axis] - self.exp_pos(axis)) ** 2
+        var_pos = xp.sum(traced_out_psi * variance_axis[:, xp.newaxis])
         var_pos *= self._volume_element()
         return var_pos
 
     def normalize_to(self, n_const: float) -> None:
         """Normalize total wavefunction occupation to ``n_const``."""
-        s = self._backend.einsum("xyzi,xyzi->", self._amp, self._backend.conjugate(self._amp))
-        s *= self._volume_element()
-        self._amp *= self._backend.sqrt(n_const / s)
+        xp = self._engine.xp
+        s = self._engine.inner_product(
+            self._amp,
+            self._amp,
+            volume_element=self._volume_element(),
+        )
+        self._amp *= xp.sqrt(n_const / s)
 
     def state_occupation(
         self, nth_state: int | None = None
@@ -256,9 +264,10 @@ class Wavefunction:
         if not (0 <= nth_state < self.num_int_dim):
             raise ValueError(f"nth_state must be in [0, {self.num_int_dim - 1}]")
 
-        return (
-            self._backend.sum(self._backend.abs(self._amp[:, :, :, nth_state]) ** 2)
-            * self._volume_element()
+        return self._engine.state_occupation(
+            self._amp,
+            state_index=nth_state,
+            volume_element=self._volume_element(),
         )
 
     def freely_propagate(

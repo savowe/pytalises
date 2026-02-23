@@ -23,7 +23,23 @@ class PropagationOptions:
         "FFTW_ESTIMATE",
         "FFTW_DESTROY_INPUT",
     )
+    profile_stages: bool = False
+    coupled_2x2_mode: str = "auto"
+    coupled_2x2_kernel: str = "vectorized"
 
     def __post_init__(self) -> None:
         if self.threads < 1:
             raise ValueError("PropagationOptions.threads must be >= 1")
+        if self.dtype not in {"complex64", "complex128"}:
+            raise ValueError(
+                "PropagationOptions.dtype must be one of: 'complex64', 'complex128'"
+            )
+        if self.coupled_2x2_mode not in {"auto", "eigh"}:
+            raise ValueError(
+                "PropagationOptions.coupled_2x2_mode must be one of: 'auto', 'eigh'"
+            )
+        if self.coupled_2x2_kernel not in {"vectorized", "fused"}:
+            raise ValueError(
+                "PropagationOptions.coupled_2x2_kernel must be one of: "
+                "'vectorized', 'fused'"
+            )

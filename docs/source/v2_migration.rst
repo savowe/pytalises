@@ -13,6 +13,17 @@ Quick mapping
 - ``num_time_steps`` -> ``steps``
 - ``delta_t`` -> ``dt``
 - ``num_of_threads`` / ``FFTWflags`` -> :class:`pytalises.PropagationOptions`
+- optional GPU execution -> ``PropagationOptions(backend="cupy")``
+  (see :doc:`gpu_backend` for details)
+
+Backend internals
+-----------------
+
+The backend/engine internals are private implementation details in v2.
+Only the public simulation API is considered stable:
+:class:`pytalises.Grid`, :class:`pytalises.Wavefunction`,
+:func:`pytalises.propagate`, :func:`pytalises.freely_propagate`, and
+structured potentials/options.
 
 Example (before)
 ----------------

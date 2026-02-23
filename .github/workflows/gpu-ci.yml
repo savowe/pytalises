@@ -1,0 +1,526 @@
+name: GPU CI (RunPod on-demand)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to test (branch, tag, or SHA). Empty = current ref."
+        required: false
+        default: ""
+      run_benchmarks:
+        description: "Run backend benchmark suite"
+        required: false
+        type: boolean
+        default: true
+      benchmark_sizes:
+        description: "Comma-separated grid sizes (e.g. 128,192,512)"
+        required: false
+        default: "128,192"
+      benchmark_steps:
+        description: "Propagation steps per benchmark run"
+        required: false
+        default: "25"
+      benchmark_repeats:
+        description: "Benchmark repeats"
+        required: false
+        default: "3"
+      benchmark_warmup:
+        description: "Benchmark warmup iterations"
+        required: false
+        default: "1"
+
+concurrency:
+  group: gpu-ci-${{ inputs.ref != '' && inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  reject-unauthorized:
+    if: ${{ github.actor != 'savowe' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block unauthorized trigger
+        run: |
+          echo "::error::This workflow may only be started by @savowe."
+          exit 1
+
+  cupy-tests-runpod:
+    name: CuPy backend tests (RunPod)
+    if: ${{ github.actor == 'savowe' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: gpu-ci
+
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_GPU_TYPE_ID: ${{ vars.RUNPOD_GPU_TYPE_ID != '' && vars.RUNPOD_GPU_TYPE_ID || 'NVIDIA GeForce RTX 4090' }}
+      RUNPOD_IMAGE_NAME: ${{ vars.RUNPOD_IMAGE_NAME != '' && vars.RUNPOD_IMAGE_NAME || 'runpod/pytorch:1.0.3-cu1290-torch290-ubuntu2204' }}
+      RUNPOD_CLOUD_TYPE: ${{ vars.RUNPOD_CLOUD_TYPE != '' && vars.RUNPOD_CLOUD_TYPE || 'ALL' }}
+      RUNPOD_VOLUME_MOUNT_PATH: ${{ vars.RUNPOD_VOLUME_MOUNT_PATH != '' && vars.RUNPOD_VOLUME_MOUNT_PATH || '/workspace' }}
+      RUNPOD_MIN_VCPU: ${{ vars.RUNPOD_MIN_VCPU != '' && vars.RUNPOD_MIN_VCPU || '4' }}
+      RUNPOD_MIN_MEMORY_GB: ${{ vars.RUNPOD_MIN_MEMORY_GB != '' && vars.RUNPOD_MIN_MEMORY_GB || '15' }}
+      RUNPOD_VOLUME_GB: ${{ vars.RUNPOD_VOLUME_GB != '' && vars.RUNPOD_VOLUME_GB || '30' }}
+      RUNPOD_CONTAINER_DISK_GB: ${{ vars.RUNPOD_CONTAINER_DISK_GB != '' && vars.RUNPOD_CONTAINER_DISK_GB || '30' }}
+      RUN_BENCHMARKS: ${{ inputs.run_benchmarks && 'true' || 'false' }}
+      BENCHMARK_SIZES: ${{ inputs.benchmark_sizes != '' && inputs.benchmark_sizes || '128,192' }}
+      BENCHMARK_STEPS: ${{ inputs.benchmark_steps != '' && inputs.benchmark_steps || '25' }}
+      BENCHMARK_REPEATS: ${{ inputs.benchmark_repeats != '' && inputs.benchmark_repeats || '3' }}
+      BENCHMARK_WARMUP: ${{ inputs.benchmark_warmup != '' && inputs.benchmark_warmup || '1' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
+
+      - name: Resolve checkout SHA
+        id: resolve-sha
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate required secrets
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY}" || { echo "Missing secret RUNPOD_API_KEY (set it in environment 'gpu-ci')."; exit 1; }
+          test -n "${{ secrets.RUNPOD_SSH_PRIVATE_KEY }}" || { echo "Missing secret RUNPOD_SSH_PRIVATE_KEY (set it in environment 'gpu-ci')."; exit 1; }
+
+      - name: Validate RunPod image reference
+        run: |
+          set -euo pipefail
+          case "${RUNPOD_IMAGE_NAME}" in
+            *:*) ;;
+            *)
+              echo "RUNPOD_IMAGE_NAME must include an explicit tag (e.g. runpod/pytorch:1.0.3-cu1290-torch290-ubuntu2204)."
+              exit 1
+              ;;
+          esac
+
+      - name: Validate benchmark parameters
+        run: |
+          set -euo pipefail
+          [[ "${BENCHMARK_SIZES}" =~ ^[0-9]+(,[0-9]+)*$ ]] || { echo "benchmark_sizes must be comma-separated positive integers"; exit 1; }
+          [[ "${BENCHMARK_STEPS}" =~ ^[0-9]+$ ]] || { echo "benchmark_steps must be a positive integer"; exit 1; }
+          [[ "${BENCHMARK_REPEATS}" =~ ^[0-9]+$ ]] || { echo "benchmark_repeats must be a positive integer"; exit 1; }
+          [[ "${BENCHMARK_WARMUP}" =~ ^[0-9]+$ ]] || { echo "benchmark_warmup must be a non-negative integer"; exit 1; }
+
+          [ "${BENCHMARK_STEPS}" -ge 1 ] || { echo "benchmark_steps must be >= 1"; exit 1; }
+          [ "${BENCHMARK_REPEATS}" -ge 1 ] || { echo "benchmark_repeats must be >= 1"; exit 1; }
+
+      - name: Install workflow dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq openssh-client
+
+      - name: Configure SSH key
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' '${{ secrets.RUNPOD_SSH_PRIVATE_KEY }}' > ~/.ssh/id_runpod
+          chmod 600 ~/.ssh/id_runpod
+
+      - name: Create RunPod on-demand pod
+        id: create-pod
+        run: |
+          set -euo pipefail
+
+          QUERY='mutation ($input: PodFindAndDeployOnDemandInput!) { podFindAndDeployOnDemand(input: $input) { id desiredStatus machine { podHostId } } }'
+
+          PAYLOAD=$(jq -n \
+            --arg query "$QUERY" \
+            --arg cloud "$RUNPOD_CLOUD_TYPE" \
+            --arg gpu "$RUNPOD_GPU_TYPE_ID" \
+            --arg image "$RUNPOD_IMAGE_NAME" \
+            --arg name "pytalises-gpu-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --arg mount "$RUNPOD_VOLUME_MOUNT_PATH" \
+            --arg ports "22/tcp" \
+            --arg minVcpu "$RUNPOD_MIN_VCPU" \
+            --arg minMem "$RUNPOD_MIN_MEMORY_GB" \
+            --arg vol "$RUNPOD_VOLUME_GB" \
+            --arg disk "$RUNPOD_CONTAINER_DISK_GB" \
+            '{
+              query: $query,
+              variables: {
+                input: {
+                  cloudType: $cloud,
+                  gpuCount: 1,
+                  gpuTypeId: $gpu,
+                  name: $name,
+                  imageName: $image,
+                  startSsh: true,
+                  supportPublicIp: true,
+                  ports: $ports,
+                  minVcpuCount: ($minVcpu | tonumber),
+                  minMemoryInGb: ($minMem | tonumber),
+                  volumeInGb: ($vol | tonumber),
+                  containerDiskInGb: ($disk | tonumber),
+                  volumeMountPath: $mount
+                }
+              }
+            }')
+
+          RESPONSE=$(curl --silent --show-error --fail \
+            --request POST \
+            --header 'content-type: application/json' \
+            --url "https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}" \
+            --data "$PAYLOAD")
+
+          echo "$RESPONSE" | jq .
+
+          if [ "$(echo "$RESPONSE" | jq '.errors | length // 0')" != "0" ]; then
+            echo "RunPod API returned errors while creating pod"
+            exit 1
+          fi
+
+          POD_ID=$(echo "$RESPONSE" | jq -r '.data.podFindAndDeployOnDemand.id // empty')
+          POD_HOST_ID=$(echo "$RESPONSE" | jq -r '.data.podFindAndDeployOnDemand.machine.podHostId // empty')
+          if [ -z "$POD_ID" ]; then
+            echo "RunPod pod id missing in response"
+            exit 1
+          fi
+
+          echo "pod_id=$POD_ID" >> "$GITHUB_OUTPUT"
+          if [ -n "$POD_HOST_ID" ]; then
+            echo "pod_host_id=$POD_HOST_ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for SSH endpoint
+        id: wait-ssh
+        env:
+          POD_ID: ${{ steps.create-pod.outputs.pod_id }}
+          POD_HOST_ID: ${{ steps.create-pod.outputs.pod_host_id }}
+          RUN_BENCHMARKS: ${{ env.RUN_BENCHMARKS }}
+        run: |
+          set -euo pipefail
+
+          QUERY='query ($input: PodFilter) { pod(input: $input) { id desiredStatus runtime { ports { ip isIpPublic privatePort publicPort type } } } }'
+
+          for attempt in $(seq 1 30); do
+            PAYLOAD=$(jq -n \
+              --arg query "$QUERY" \
+              --arg podId "$POD_ID" \
+              '{query: $query, variables: {input: {podId: $podId}}}')
+
+            HTTP_BODY=$(mktemp)
+            HTTP_CODE=$(curl --silent --show-error \
+              --output "$HTTP_BODY" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header 'content-type: application/json' \
+              --url "https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}" \
+              --data "$PAYLOAD")
+
+            RESPONSE=$(cat "$HTTP_BODY")
+            rm -f "$HTTP_BODY"
+
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "Attempt ${attempt}: RunPod returned HTTP ${HTTP_CODE}; retrying..."
+              sleep 10
+              continue
+            fi
+
+            ERRORS=$(echo "$RESPONSE" | jq '.errors | length // 0')
+            if [ "$ERRORS" != "0" ]; then
+              echo "Attempt ${attempt}: GraphQL errors while waiting for pod endpoint:"
+              echo "$RESPONSE" | jq '.errors'
+              sleep 10
+              continue
+            fi
+
+            STATUS=$(echo "$RESPONSE" | jq -r '.data.pod.desiredStatus // "UNKNOWN"')
+
+            HOST=$(echo "$RESPONSE" | jq -r '.data.pod.runtime.ports[]? | select((.privatePort | tostring) == "22" and .publicPort != null and .ip != null and (.isIpPublic == true or .isIpPublic == null)) | .ip' | head -n1)
+            PORT=$(echo "$RESPONSE" | jq -r '.data.pod.runtime.ports[]? | select((.privatePort | tostring) == "22" and .publicPort != null and .ip != null and (.isIpPublic == true or .isIpPublic == null)) | .publicPort' | head -n1)
+
+            if [ -n "${HOST}" ] && [ -n "${PORT}" ] && [ "${HOST}" != "null" ] && [ "${PORT}" != "null" ]; then
+              echo "ssh_host=$HOST" >> "$GITHUB_OUTPUT"
+              echo "ssh_port=$PORT" >> "$GITHUB_OUTPUT"
+              echo "ssh_user=root" >> "$GITHUB_OUTPUT"
+              echo "ssh_mode=public-ip" >> "$GITHUB_OUTPUT"
+              echo "Found public SSH endpoint: ${HOST}:${PORT}"
+              exit 0
+            fi
+
+            if [ "$STATUS" = "RUNNING" ] && [ -n "${POD_HOST_ID:-}" ]; then
+              if [ "${RUN_BENCHMARKS}" = "true" ] && [ "$attempt" -lt 18 ]; then
+                echo "Attempt ${attempt}: pod is running but public SSH endpoint is not ready yet (benchmarks prefer public IP for SCP artifact transfer)."
+              else
+                if [ "${RUN_BENCHMARKS}" = "true" ]; then
+                  echo "Public SSH endpoint still unavailable after waiting; falling back to RunPod SSH proxy with log-based benchmark payload extraction."
+                else
+                  echo "No public SSH endpoint yet; falling back to RunPod SSH proxy via ssh.runpod.io"
+                fi
+                echo "ssh_host=ssh.runpod.io" >> "$GITHUB_OUTPUT"
+                echo "ssh_port=22" >> "$GITHUB_OUTPUT"
+                echo "ssh_user=$POD_HOST_ID" >> "$GITHUB_OUTPUT"
+                echo "ssh_mode=proxy" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+
+            echo "Attempt ${attempt}: status=${STATUS}, waiting for SSH endpoint..."
+            sleep 10
+          done
+
+          echo "Timed out waiting for RunPod SSH endpoint"
+          exit 1
+
+      - name: Wait for SSH connectivity
+        env:
+          SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
+          SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
+          SSH_USER: ${{ steps.wait-ssh.outputs.ssh_user }}
+          SSH_MODE: ${{ steps.wait-ssh.outputs.ssh_mode }}
+        run: |
+          set -euo pipefail
+          echo "Using SSH mode: ${SSH_MODE} (${SSH_USER}@${SSH_HOST}:${SSH_PORT})"
+
+          SSH_TTY_FLAG=""
+          if [ "${SSH_MODE}" = "proxy" ]; then
+            echo "Proxy mode detected; skipping explicit connectivity probe."
+            exit 0
+          fi
+
+          for attempt in $(seq 1 30); do
+            set +e
+            OUT=$(timeout 20s ssh ${SSH_TTY_FLAG} \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=8 \
+              -o ConnectionAttempts=1 \
+              -o BatchMode=yes \
+              -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" \
+              'echo connected; exit' 2>&1)
+            SSH_RC=$?
+            set -e
+
+            echo "$OUT"
+            if [ "$SSH_RC" -eq 0 ] && echo "$OUT" | grep -q "connected"; then
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}: waiting for SSH connectivity..."
+            sleep 10
+          done
+          echo "SSH never became reachable"
+          exit 1
+
+      - name: Upload source, run GPU tests, and collect benchmark output
+        env:
+          SSH_HOST: ${{ steps.wait-ssh.outputs.ssh_host }}
+          SSH_PORT: ${{ steps.wait-ssh.outputs.ssh_port }}
+          SSH_USER: ${{ steps.wait-ssh.outputs.ssh_user }}
+          SSH_MODE: ${{ steps.wait-ssh.outputs.ssh_mode }}
+          RUN_BENCHMARKS: ${{ env.RUN_BENCHMARKS }}
+        run: |
+          set -euo pipefail
+
+          SSH_TTY_FLAG=""
+          if [ "${SSH_MODE}" = "proxy" ]; then
+            SSH_TTY_FLAG="-tt"
+          fi
+
+          SSH_LOG=$(mktemp)
+          set +e
+          timeout 30m ssh ${SSH_TTY_FLAG} \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=10 \
+            -o ConnectionAttempts=1 \
+            -o BatchMode=yes \
+            -i ~/.ssh/id_runpod -p "$SSH_PORT" "$SSH_USER"@"$SSH_HOST" \
+            "bash -se" \
+            <<'REMOTE' > "$SSH_LOG" 2>&1
+          set -euo pipefail
+
+          REPO='${{ github.repository }}'
+          SHA='${{ steps.resolve-sha.outputs.sha }}'
+          RUN_BENCH='${{ env.RUN_BENCHMARKS }}'
+          BENCH_SIZES='${{ env.BENCHMARK_SIZES }}'
+          BENCH_STEPS='${{ env.BENCHMARK_STEPS }}'
+          BENCH_REPEATS='${{ env.BENCHMARK_REPEATS }}'
+          BENCH_WARMUP='${{ env.BENCHMARK_WARMUP }}'
+          export REPO SHA RUN_BENCH BENCH_SIZES BENCH_STEPS BENCH_REPEATS BENCH_WARMUP
+
+          cat > /tmp/pytalises-ci.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "python3 is required in the selected RunPod image."
+            exit 1
+          fi
+          if ! command -v git >/dev/null 2>&1; then
+            echo "git is required in the selected RunPod image."
+            exit 1
+          fi
+
+          rm -rf /workspace/pytalises
+          git clone --depth 1 https://github.com/${REPO}.git /workspace/pytalises
+          cd /workspace/pytalises
+          git fetch --depth 1 origin ${SHA}
+          git checkout --detach ${SHA}
+
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e ".[gpu]" pytest
+          pytest tests/backend_test.py tests/cupy_backend_test.py -q
+
+          if [ "${RUN_BENCH}" = "true" ]; then
+            python3 benchmarks/backend_benchmark.py \
+              --sizes "${BENCH_SIZES}" \
+              --workloads free,potential \
+              --steps "${BENCH_STEPS}" \
+              --repeats "${BENCH_REPEATS}" \
+              --warmup "${BENCH_WARMUP}" \
+              --json-out /workspace/backend-benchmark.json
+
+            python3 - <<'PY'
+          import base64
+          p = '/workspace/backend-benchmark.json'
+          with open(p, 'rb') as f:
+              data = f.read()
+          print('BENCHMARK_JSON_B64=' + base64.b64encode(data).decode())
+          PY
+          fi
+          SCRIPT
+
+          chmod +x /tmp/pytalises-ci.sh
+          set +e
+          /tmp/pytalises-ci.sh
+          EC=$?
+          set -e
+          echo "__RUNPOD_EXIT_CODE__:${EC}"
+          exit "$EC"
+          REMOTE
+          SSH_RC=$?
+          set -e
+
+          cat "$SSH_LOG"
+
+          REMOTE_EC=$(grep -o '__RUNPOD_EXIT_CODE__:[0-9]\+' "$SSH_LOG" | tail -n1 | cut -d: -f2)
+          if [ -z "${REMOTE_EC:-}" ]; then
+            echo "Remote exit marker missing"
+            exit 1
+          fi
+          if [ "$SSH_RC" -ne 0 ] || [ "$REMOTE_EC" -ne 0 ]; then
+            echo "Remote CI script failed (ssh_rc=$SSH_RC, remote_ec=$REMOTE_EC)"
+            exit 1
+          fi
+
+          if [ "${RUN_BENCHMARKS}" = "true" ]; then
+            if [ "${SSH_MODE}" = "public-ip" ]; then
+              timeout 5m scp \
+                -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null \
+                -o ConnectTimeout=10 \
+                -o ConnectionAttempts=1 \
+                -o BatchMode=yes \
+                -i ~/.ssh/id_runpod -P "$SSH_PORT" "$SSH_USER"@"$SSH_HOST":/workspace/backend-benchmark.json /tmp/backend-benchmark.json
+            else
+              echo "Public IP mode unavailable; falling back to benchmark payload extraction from SSH logs."
+              CLEAN_LOG=$(mktemp)
+              tr -d '\r' < "$SSH_LOG" \
+                | sed -r 's/\x1B\[[0-9;?]*[ -\/]*[@-~]//g' \
+                > "$CLEAN_LOG"
+
+              B64=$(grep -ao 'BENCHMARK_JSON_B64=[A-Za-z0-9+/=]\+' "$CLEAN_LOG" | tail -n1 | cut -d= -f2-)
+              if [ -z "$B64" ]; then
+                echo "Could not extract benchmark payload from SSH output"
+                rm -f "$CLEAN_LOG"
+                exit 1
+              fi
+              printf '%s' "$B64" | base64 -d > /tmp/backend-benchmark.json
+              rm -f "$CLEAN_LOG"
+            fi
+          fi
+
+          rm -f "$SSH_LOG"
+
+      - name: Add benchmark summary
+        if: ${{ inputs.run_benchmarks }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path('/tmp/backend-benchmark.json')
+          data = json.loads(path.read_text())
+
+          lines = [
+              '## Backend benchmark summary',
+              '',
+              '| Backend | Workload | Grid | Mean (s) | Std (s) |',
+              '|---|---|---:|---:|---:|',
+          ]
+
+          for row in data.get('results', []):
+              lines.append(
+                  f"| {row['backend']} | {row['workload']} | {row['size']} | "
+                  f"{row['mean_seconds']:.4f} | {row['std_seconds']:.4f} |"
+              )
+
+          speedups = data.get('speedups_numpy_over_cupy', {})
+          if speedups:
+              lines.append('')
+              lines.append('**Speedups (NumPy/CuPy):**')
+              for key, value in sorted(speedups.items()):
+                  lines.append(f"- `{key}`: {value:.2f}x")
+
+          metadata = data.get('metadata', {})
+          if isinstance(metadata, dict):
+              lines.append('')
+              lines.append(
+                  f"**Host:** CPU cores={metadata.get('cpu_count')}, "
+                  f"backends={metadata.get('available_backends')}"
+              )
+              cuda = metadata.get('cuda')
+              if isinstance(cuda, dict):
+                  lines.append(
+                      f"**CUDA device:** {cuda.get('device_name')} "
+                      f"(CuPy {cuda.get('cupy_version')})"
+                  )
+
+          parity = data.get('parity')
+          if isinstance(parity, dict):
+              lines.append('')
+              lines.append(
+                  '**Parity max abs diff:** '
+                  f"density={parity['max_density_abs_diff']:.3e}, "
+                  f"occupation={parity['max_occupation_abs_diff']:.3e}"
+              )
+
+          summary_path = Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with open(summary_path, 'a', encoding='utf-8') as fh:
+              fh.write('\n'.join(lines) + '\n')
+          PY
+
+      - name: Upload benchmark artifact
+        if: ${{ inputs.run_benchmarks }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-benchmark-${{ github.run_id }}
+          path: /tmp/backend-benchmark.json
+
+      - name: Terminate RunPod pod
+        if: ${{ always() && steps.create-pod.outputs.pod_id != '' }}
+        env:
+          POD_ID: ${{ steps.create-pod.outputs.pod_id }}
+        run: |
+          set -euo pipefail
+
+          QUERY='mutation ($input: PodTerminateInput!) { podTerminate(input: $input) }'
+          PAYLOAD=$(jq -n \
+            --arg query "$QUERY" \
+            --arg podId "$POD_ID" \
+            '{query: $query, variables: {input: {podId: $podId}}}')
+
+          RESPONSE=$(curl --silent --show-error --fail \
+            --request POST \
+            --header 'content-type: application/json' \
+            --url "https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}" \
+            --data "$PAYLOAD")
+
+          echo "$RESPONSE" | jq .
