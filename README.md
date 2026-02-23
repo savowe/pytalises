@@ -48,15 +48,15 @@ pip install pytalises[gpu]
 
 ## Why pyTALISES?
 
-| Feature | pyTALISES | QuTiP |
-|---------|-----------|-------|
-| Split-step Fourier | ✅ Native | ❌ |
-| Arbitrary internal states | ✅ | ✅ |
-| GPU acceleration | ✅ CuPy | ❌ |
-| Time-dependent potentials | ✅ String expressions | ✅ |
-| Learning curve | Easy | Medium |
+pyTALISES excels at **position-space wavefunction dynamics**:
 
-pyTALISES is designed for **position-space wavefunction dynamics** — BEC simulations, atom interferometry, matter-wave diffraction. If you need density matrices or open quantum systems, QuTiP is better suited.
+- 🌊 **Matter-wave propagation** — free expansion, wavepacket dynamics
+- 🔬 **Atom optics** — Bragg diffraction, beam splitters, interferometry
+- ⚛️ **Cold atom physics** — BEC dynamics, nonlinear interactions
+- 📡 **Light-matter coupling** — Rabi oscillations, Raman transitions
+- 🎯 **Multi-level systems** — arbitrary internal state structure
+
+If you need to propagate wavefunctions on spatial grids with time-dependent potentials, pyTALISES makes it simple.
 
 ## Features
 
